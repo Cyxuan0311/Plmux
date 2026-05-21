@@ -1,0 +1,11 @@
+项目报告.md
+*.pyd
+*.so
+__pycache__/
+build/
+plmux_debug/
+plmux_debug.log
+plmux.egg-info/
+.benchmark/
+.pytest_cache/
+.mypy_cache/

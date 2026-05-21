@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>plmux web</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css">
+<script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xterm-addon-web-links@0.9.0/lib/xterm-addon-web-links.js"></script>
+<style>
+:root {
+  --mode-normal-fg: #000;
+  --mode-normal-bg: #a6e22e;
+  --mode-prefix-fg: #000;
+  --mode-prefix-bg: #fabd2f;
+  --mode-cmdline-fg: #000;
+  --mode-cmdline-bg: #83a598;
+  --win-fg: #fff;
+  --win-bg: #66d9ef;
+  --pane-fg: #bdae93;
+  --pane-bg: #504945;
+  --clock-fg: #000;
+  --clock-bg: #85c751;
+  --host-fg: #000;
+  --host-bg: #85c751;
+  --cmd-fg: #fff;
+  --cmd-bg: #75715e;
+  --bat-ok-bg: #85c751;
+  --bat-mid-bg: #fabd2f;
+  --bat-low-bg: #f92672;
+  --cl-indicator-fg: #fabd2f;
+  --cl-indicator-bg: #2d2d2d;
+  --cl-body-fg: #83a598;
+  --cl-body-bg: #2d2d2d;
+  --cl-bg: #2d2d2d;
+  --term-bg: #1d2021;
+  --term-fg: #ebdbb2;
+  --border-active: #85c751;
+  --border-inactive: #505050;
+  --sb-height: 28px;
+  --cl-height: 26px;
+  --sb-font: 12px;
+  --pane-gap: 2px;
+  --overlay-radius: 6px;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+html, body { width:100%; height:100%; overflow:hidden; background:var(--term-bg); color:var(--term-fg); }
+body { display:flex; flex-direction:column; font-family:'Cascadia Code','Fira Code','JetBrains Mono','SF Mono','Menlo',monospace; -webkit-font-smoothing:antialiased; }
+
+#status-bar {
+  display:flex;
+  justify-content:space-between;
+  align-items:stretch;
+  height:var(--sb-height);
+  font-size:var(--sb-font);
+  user-select:none;
+  flex-shrink:0;
+  background:var(--pane-bg);
+  z-index:10;
+}
+#status-bar .left, #status-bar .right { display:flex; align-items:center; }
+
+.sb-seg {
+  display:inline-flex;
+  align-items:center;
+  padding:0 10px;
+  height:100%;
+  white-space:nowrap;
+  font-weight:700;
+  letter-spacing:0.5px;
+  gap:4px;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.sb-seg .icon { font-size:11px; opacity:0.85; }
+
+.sb-seg.mode-normal { background:var(--mode-normal-bg); color:var(--mode-normal-fg); }
+.sb-seg.mode-prefix { background:var(--mode-prefix-bg); color:var(--mode-prefix-fg); }
+.sb-seg.mode-cmdline { background:var(--mode-cmdline-bg); color:var(--mode-cmdline-fg); }
+.sb-seg.mode-copy { background:#458588; color:#fff; }
+.sb-seg.mode-help { background:#b16286; color:#fff; }
+.sb-seg.mode-theme_list { background:#689d6a; color:#fff; }
+.sb-seg.mode-session_list { background:#cc241d; color:#fff; }
+.sb-seg.mode-plugin_list { background:#d79921; color:#000; }
+.sb-seg.mode-layout_list { background:#458588; color:#fff; }
+.sb-seg.mode-esc_wait { background:var(--mode-normal-bg); color:var(--mode-normal-fg); }
+.sb-seg.win { background:var(--win-bg); color:var(--win-fg); }
+.sb-seg.pane { background:var(--pane-bg); color:var(--pane-fg); }
+.sb-seg.cmd { background:var(--cmd-bg); color:var(--cmd-fg); }
+.sb-seg.bat-ok { background:var(--bat-ok-bg); color:#000; }
+.sb-seg.bat-mid { background:var(--bat-mid-bg); color:#000; }
+.sb-seg.bat-low { background:var(--bat-low-bg); color:#fff; }
+.sb-seg.clock { background:var(--clock-bg); color:var(--clock-fg); }
+.sb-seg.host { background:var(--host-bg); color:var(--host-fg); }
+
+.sb-arrow-l, .sb-arrow-r {
+  width:0; height:0;
+  border-top: calc(var(--sb-height) / 2) solid transparent;
+  border-bottom: calc(var(--sb-height) / 2) solid transparent;
+  flex-shrink:0;
+}
+.sb-arrow-l { border-right: 7px solid; }
+.sb-arrow-r { border-left: 7px solid; }
+
+#terminal-area {
+  flex:1;
+  min-height:0;
+  position:relative;
+  overflow:hidden;
+}
+
+.pane-container {
+  position:absolute;
+  overflow:hidden;
+  border-radius:2px;
+}
+
+.pane-container .pane-border {
+  position:absolute;
+  top:0; left:0; right:0; bottom:0;
+  border:1px solid var(--border-inactive);
+  pointer-events:none;
+  z-index:2;
+  transition: border-color 0.2s ease, border-width 0.1s ease;
+}
+
+.pane-container.focused .pane-border {
+  border-color:var(--border-active);
+  border-width:2px;
+  box-shadow: 0 0 6px rgba(133,199,81,0.25);
+}
+
+.pane-container .pane-title {
+  position:absolute;
+  top:1px; left:6px;
+  font-size:10px;
+  padding:1px 5px;
+  background:var(--term-bg);
+  color:var(--border-inactive);
+  z-index:3;
+  pointer-events:none;
+  line-height:14px;
+  border-radius:2px;
+  opacity:0.7;
+  transition: color 0.2s ease, opacity 0.2s ease;
+}
+
+.pane-container.focused .pane-title {
+  color:var(--border-active);
+  opacity:1;
+}
+
+.pane-container .xterm { height:100%; width:100%; }
+.pane-container .xterm-viewport { height:100% !important; }
+.pane-container .xterm-screen { height:100% !important; }
+.xterm-viewport::-webkit-scrollbar { width:6px; }
+.xterm-viewport::-webkit-scrollbar-track { background:transparent; }
+.xterm-viewport::-webkit-scrollbar-thumb { background:rgba(255,255,255,0.12); border-radius:3px; }
+
+#overlay-container {
+  position:absolute;
+  top:0; left:0; right:0; bottom:0;
+  z-index:50;
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  background:rgba(0,0,0,0.65);
+  backdrop-filter:blur(3px);
+  -webkit-backdrop-filter:blur(3px);
+  animation: overlayFadeIn 0.15s ease;
+}
+#overlay-container.hidden { display:none; }
+
+@keyframes overlayFadeIn {
+  from { opacity:0; }
+  to { opacity:1; }
+}
+
+#overlay-panel {
+  background:var(--term-bg);
+  border:2px solid var(--border-active);
+  border-radius:var(--overlay-radius);
+  max-width:90%;
+  max-height:90%;
+  overflow:auto;
+  box-shadow:0 8px 32px rgba(0,0,0,0.5), 0 0 0 1px rgba(133,199,81,0.15);
+}
+
+#overlay-panel .xterm { padding:8px; }
+#overlay-panel .xterm-viewport { overflow-y:auto !important; }
+
+#cmdline-bar {
+  height:var(--cl-height);
+  display:flex;
+  align-items:center;
+  font-size:12px;
+  flex-shrink:0;
+  background:var(--cl-bg);
+  padding:0 10px;
+  gap:6px;
+  z-index:10;
+  border-top:1px solid rgba(255,255,255,0.06);
+}
+#cmdline-bar .indicator {
+  font-weight:700;
+  padding:2px 8px;
+  border-radius:3px;
+  font-size:11px;
+  letter-spacing:0.5px;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+#cmdline-bar .indicator.ready { background:var(--cl-indicator-bg); color:var(--cl-indicator-fg); }
+#cmdline-bar .indicator.command { background:var(--mode-cmdline-bg); color:var(--mode-cmdline-fg); }
+#cmdline-bar .hint { color:var(--pane-fg); opacity:0.5; font-size:11px; }
+#cmdline-bar .buffer { color:var(--cl-body-fg); }
+#cmdline-bar .cursor-ch { color:var(--cl-indicator-fg); font-weight:bold; animation:blink 1s step-end infinite; }
+
+@keyframes blink { 50% { opacity:0; } }
+
+#connect-overlay {
+  position:absolute;
+  top:0; left:0; right:0; bottom:0;
+  background:rgba(0,0,0,0.92);
+  display:flex;
+  flex-direction:column;
+  justify-content:center;
+  align-items:center;
+  z-index:100;
+  gap:14px;
+  backdrop-filter:blur(6px);
+  -webkit-backdrop-filter:blur(6px);
+}
+#connect-overlay.hidden { display:none; }
+#connect-overlay h2 { color:var(--mode-normal-bg); font-size:24px; font-weight:700; letter-spacing:1.5px; }
+#connect-overlay p { color:var(--pane-fg); font-size:13px; opacity:0.7; }
+#connect-overlay .status { color:var(--win-bg); font-size:12px; }
+#connect-overlay .spinner {
+  width:28px; height:28px;
+  border:2.5px solid rgba(255,255,255,0.12);
+  border-top-color:var(--mode-normal-bg);
+  border-radius:50%;
+  animation:spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform:rotate(360deg); } }
+
+@media (max-width:600px) {
+  :root { --sb-font:10px; --sb-height:22px; --cl-height:20px; }
+  .sb-seg { padding:0 5px; }
+  .sb-arrow-l, .sb-arrow-r { display:none; }
+}
+</style>
+</head>
+<body>
+
+<div id="status-bar">
+  <div class="left">
+    <span class="sb-seg mode-normal" id="sb-mode">NORMAL</span>
+    <span class="sb-arrow-l" id="arr-mode" style="border-right-color:var(--mode-normal-bg)"></span>
+    <span class="sb-seg win" id="sb-win"><span class="icon">&#x1F5B9;</span> W1</span>
+    <span class="sb-arrow-l" id="arr-win" style="border-right-color:var(--win-bg)"></span>
+    <span class="sb-seg pane" id="sb-pane"><span class="icon">&#x25A6;</span> P1</span>
+    <span class="sb-arrow-l" id="arr-cmd" style="border-right-color:var(--cmd-bg);display:none"></span>
+    <span class="sb-seg cmd" id="sb-cmd" style="display:none"></span>
+  </div>
+  <div class="right">
+    <span class="sb-seg bat-ok" id="sb-bat" style="display:none"></span>
+    <span class="sb-arrow-r" id="arr-bat" style="display:none"></span>
+    <span class="sb-arrow-r" id="arr-clock-r" style="border-left-color:var(--clock-bg)"></span>
+    <span class="sb-seg clock" id="sb-clock"><span class="icon">&#x1F552;</span> --:--:--</span>
+    <span class="sb-arrow-r" id="arr-host-r" style="border-left-color:var(--host-bg)"></span>
+    <span class="sb-seg host" id="sb-host"><span class="icon">&#x2318;</span> plmux</span>
+  </div>
+</div>
+
+<div id="terminal-area">
+  <div id="overlay-container" class="hidden">
+    <div id="overlay-panel"></div>
+  </div>
+</div>
+
+<div id="cmdline-bar">
+  <span class="indicator ready" id="cl-indicator">READY</span>
+  <span class="hint" id="cl-hint">Esc : cmd &middot; Ctrl+B prefix</span>
+  <span class="buffer" id="cl-buffer" style="display:none"></span>
+  <span class="cursor-ch" id="cl-cursor" style="display:none">&#x258C;</span>
+</div>
+
+<div id="connect-overlay">
+  <div class="spinner"></div>
+  <h2>plmux web</h2>
+  <p>Browser-based terminal session</p>
+  <span class="status" id="conn-status">Connecting...</span>
+</div>
+
+<script type="module" src="/static/app.js"></script>
+</body>
+</html>

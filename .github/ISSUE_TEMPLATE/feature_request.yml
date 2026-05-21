@@ -1,0 +1,43 @@
+name: Feature Request
+description: Suggest a new feature or enhancement
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the suggestion! Please describe your idea below.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / Motivation
+      description: What problem does this feature solve?
+      placeholder: "I'm frustrated when..."
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed Solution
+      description: How would you like it to work?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: Any alternative solutions or features you've considered
+  - type: dropdown
+    id: category
+    attributes:
+      label: Category
+      options:
+        - UI / Display
+        - Key Bindings
+        - Plugin System
+        - Terminal Emulation
+        - Session Management
+        - Configuration
+        - Performance
+        - Other
+    validations:
+      required: true

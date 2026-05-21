@@ -1,0 +1,25 @@
+{
+  "shell": null,
+  "env": {},
+  "ui": {
+    "refresh_hz": 60,
+    "use_alternate_screen": true,
+    "status_position": "bottom",
+    "command_line_height": 1,
+    "min_pane_rows": 3,
+    "min_pane_cols": 10
+  },
+  "keys": {
+    "prefix": "ctrl+b",
+    "command_line": ":"
+  },
+  "session": {
+    "auto_save": true,
+    "state_path": null
+  },
+  "theme": "default",
+  "extensions": {
+    "enabled": [],
+    "search_paths": ["~/.config/plmux/extensions"]
+  }
+}

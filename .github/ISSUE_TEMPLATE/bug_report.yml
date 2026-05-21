@@ -1,0 +1,66 @@
+name: Bug Report
+description: Report a bug or unexpected behavior
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug! Please fill out the sections below.
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: A clear description of the bug
+      placeholder: "When I do X, Y happens instead of Z..."
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      description: How to reproduce the issue
+      placeholder: |
+        1. Start plmux
+        2. Press ^B %
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What you expected to happen
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual Behavior
+      description: What actually happened
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating System
+      placeholder: "e.g. Ubuntu 24.04, macOS 14, Windows 11"
+    validations:
+      required: true
+  - type: input
+    id: python
+    attributes:
+      label: Python Version
+      placeholder: "e.g. 3.10.12"
+    validations:
+      required: true
+  - type: input
+    id: plmux_version
+    attributes:
+      label: plmux Version
+      placeholder: "e.g. 0.1.0 or git commit hash"
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant Logs
+      description: Paste any relevant log output
+      render: shell
