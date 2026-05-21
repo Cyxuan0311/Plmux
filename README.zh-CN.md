@@ -112,7 +112,7 @@ plmux kill-server      # 终止守护进程
 
 使用 `Tab` 进行命令补全。
 
-## Web 客户端
+## Web 客户端 (计划中)
 
 plmux 内置 Web 服务器，支持通过浏览器访问终端。详见 [Web 客户端](docs/web-client.zh-CN.md) 完整文档。
 

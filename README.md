@@ -112,7 +112,7 @@ Press `Esc` then `:` to enter command mode.
 
 Use `Tab` for command completion.
 
-## Web Client
+## Web Client (Planned)
 
 plmux includes a built-in web server that allows browser-based terminal access. See [Web Client](docs/web-client.md) for full documentation.
 
