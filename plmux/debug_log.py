@@ -5,10 +5,8 @@ from __future__ import annotations
 import logging
 import os
 import queue
-import sys
 import threading
 import time
-from collections import defaultdict
 from pathlib import Path
 from typing import Any, Optional
 

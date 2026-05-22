@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 import os
 import sys
 from pathlib import Path
@@ -305,7 +305,6 @@ class PaneWorkspace:
         win = self._window()
         indices = pane_indices(win.tree)
         keep_idx = self.focus_pane
-        keep = self.sessions[keep_idx]
         for idx in sorted(indices, reverse=True):
             if idx != keep_idx:
                 emit_hook("pane_closed", ExtensionContext(hook_name="pane_closed", pane_index=idx))

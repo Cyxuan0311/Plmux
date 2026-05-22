@@ -8,9 +8,9 @@ import os
 import subprocess
 import sys
 import tempfile
-import time
 from typing import Callable
 
+from plmux.config.schema import PlmuxConfig
 from plmux.daemon import (
     ServerState,
     SessionHandle,
@@ -20,6 +20,7 @@ from plmux.daemon import (
 )
 from plmux.session.models import tree_from_json, tree_to_json
 from plmux.terminal.session import TerminalSession
+from plmux.ui.theme import Theme
 from plmux.workspace import PaneWorkspace, Window
 
 
@@ -59,7 +60,10 @@ def spawn_server_subprocess(state: ServerState) -> None:
             "stderr": subprocess.DEVNULL,
         }
         if sys.platform == "win32":
-            kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP  # type: ignore[attr-defined]
+            kwargs["creationflags"] = (
+                subprocess.CREATE_NEW_PROCESS_GROUP  # type: ignore[attr-defined]
+                | subprocess.DETACHED_PROCESS  # type: ignore[attr-defined]
+            )
         else:
             kwargs["close_fds"] = True
 
@@ -86,7 +90,8 @@ def serve_mode(state_file: str) -> None:
         except OSError:
             pass
 
-    from plmux.platform.pty_factory import resolve_shell_argv, spawn_pty
+    from plmux.platform.shell import resolve_shell_argv
+    from plmux.platform.pty_factory import spawn_pty
 
     sessions_data = data.get("sessions", [])
     procs: list = []
@@ -125,7 +130,7 @@ def serve_mode(state_file: str) -> None:
 def connect_and_receive_sync() -> tuple[ServerState, list[int]]:
     import asyncio as _asyncio
     try:
-        loop = _asyncio.get_running_loop()
+        _asyncio.get_running_loop()
     except RuntimeError:
         try:
             result = _asyncio.run(connect_and_receive())
@@ -147,13 +152,11 @@ def connect_and_receive_sync() -> tuple[ServerState, list[int]]:
 
 def build_workspace_from_state(
     state: ServerState,
-    cfg: "PlmuxConfig",
-    theme: "Theme",
+    cfg: PlmuxConfig,
+    theme: Theme,
     on_dirty: Callable[[], None] | None,
     target_session: str | None = None,
-) -> "PaneWorkspace":
-    from plmux.config.schema import PlmuxConfig
-    from plmux.ui.theme import Theme
+) -> PaneWorkspace:
 
     ws = PaneWorkspace.__new__(PaneWorkspace)
     ws.cfg = cfg
@@ -199,11 +202,16 @@ def build_workspace_from_state(
             session.restore_buffer(encoded)
 
         try:
-            session.proc.setwinsize(sh.rows + 1, sh.cols)
-            time.sleep(0.05)
             session.proc.setwinsize(sh.rows, sh.cols)
         except OSError:
             pass
+
+    if is_windows():
+        _sock0 = getattr(state.sessions[0], "_sock", None) if state.sessions else None
+        if _sock0 is not None:
+            from plmux.platform.pty_handle import start_proxy_reader
+            handles = [s.proc for s in ws.sessions]
+            start_proxy_reader(_sock0, handles)
 
     if target_session is not None:
         try:
@@ -219,7 +227,7 @@ def build_workspace_from_state(
     return ws
 
 
-def build_detach_state(ws: "PaneWorkspace", cfg: "PlmuxConfig") -> ServerState:
+def build_detach_state(ws: PaneWorkspace, cfg: PlmuxConfig) -> ServerState:
     handles: list[SessionHandle] = []
     buffer_dumps: dict[str, str] = {}
     for i, s in enumerate(ws.sessions):
