@@ -2,6 +2,8 @@ import sys
 import types
 import time
 
+import pytest
+
 import plmux.app as app
 from plmux.config.loader import default_user_config_dir
 
@@ -38,13 +40,16 @@ def test_input_reader_stop():
     assert reader._stop.is_set()
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="modifies sys.platform globally")
 def test_default_user_config_dir_windows(tmp_path, monkeypatch):
     monkeypatch.setenv("APPDATA", str(tmp_path))
-    # Avoid changing global sys.platform/os.name (breaks pytest). Patch only the loader module.
     import plmux.config.loader as loader
     monkeypatch.setattr(loader.sys, "platform", "win32", raising=False)
     monkeypatch.setattr(loader.os, "name", "nt", raising=False)
-    def test_default_user_config_dir_nonwindows(tmp_path, monkeypatch):
-        # Ensure default_user_config_dir returns a valid path on this platform
-        p = default_user_config_dir()
-        assert p.name == "plmux"
+    p = default_user_config_dir()
+    assert p.name == "plmux"
+
+
+def test_default_user_config_dir_nonwindows():
+    p = default_user_config_dir()
+    assert p.name == "plmux"
