@@ -85,9 +85,9 @@ def _enter_copy_mode(ctx: AppContext) -> None:
     ctx.copy_anchor = (cy, cx)
     ctx.copy_cursor = (cy, cx)
     ctx.copy_pane = ctx.ws.focus_pane
-    setattr(s, "_copy_sel_start", ctx.copy_anchor)
-    setattr(s, "_copy_sel_end", ctx.copy_cursor)
-    setattr(s, "_copy_cursor_pos", ctx.copy_cursor)
+    s.copy_sel_start = ctx.copy_anchor
+    s.copy_sel_end = ctx.copy_cursor
+    s.copy_cursor_pos = ctx.copy_cursor
     s._line_cache.clear()
     s._last_cursor_y = -1
     s._last_cursor_x = -1

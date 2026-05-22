@@ -65,17 +65,17 @@ def adjust_ratio(tree: Tree, pane_idx: int, direction: str, delta: float = 0.05)
 
     if isinstance(a, int) and a == pane_idx:
         if (direction in ("left", "up") and d == "row") or (direction in ("up", "left") and d == "col"):
-            new_r = max(0.1, min(0.9, r - delta))
+            new_r = max(0.05, min(0.95, r - delta))
             return (d, new_r, a, b)
         elif (direction in ("right", "down") and d == "row") or (direction in ("down", "right") and d == "col"):
-            new_r = max(0.1, min(0.9, r + delta))
+            new_r = max(0.05, min(0.95, r + delta))
             return (d, new_r, a, b)
     if isinstance(b, int) and b == pane_idx:
         if (direction in ("left", "up") and d == "row") or (direction in ("up", "left") and d == "col"):
-            new_r = max(0.1, min(0.9, r - delta))
+            new_r = max(0.05, min(0.95, r - delta))
             return (d, new_r, a, b)
         elif (direction in ("right", "down") and d == "row") or (direction in ("down", "right") and d == "col"):
-            new_r = max(0.1, min(0.9, r + delta))
+            new_r = max(0.05, min(0.95, r + delta))
             return (d, new_r, a, b)
 
     ra = adjust_ratio(a, pane_idx, direction, delta)

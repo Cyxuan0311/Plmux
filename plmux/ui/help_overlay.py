@@ -145,11 +145,18 @@ def _build_copy_mode_table(theme: Theme) -> Table:
     t.add_column("Action", style="#ebdbb2")
 
     rows = [
-        ("Arrows", "Move selection cursor"),
-        ("PageUp / PageDown", "Move by visible pane height"),
+        ("Arrows / hjkl", "Move selection cursor"),
+        ("PageUp / PageDown", "Scroll by visible pane height"),
+        ("Ctrl+U / Ctrl+D", "Scroll half page up / down"),
+        ("g / G", "Jump to top / bottom of scrollback"),
         ("Home / End", "Move to line start / end"),
         ("V", "Toggle line-selection mode"),
-        ("Mouse drag", "Click+drag to select (SGR/Xterm)"),
+        ("/", "Search forward"),
+        ("?", "Search backward"),
+        ("n / N", "Next / previous search match"),
+        ("Mouse scroll", "Scroll scrollback buffer"),
+        ("Mouse drag border", "Resize pane split"),
+        ("Mouse click", "Focus pane / set cursor"),
         ("y", "Yank selection to clipboard"),
         ("Esc / q", "Exit copy-mode"),
     ]

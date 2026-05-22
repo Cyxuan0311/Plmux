@@ -7,7 +7,6 @@ import queue
 from typing import Any, Optional
 
 from plmux.web import WebClientServer
-from plmux.debug_log import dbg
 
 _web_server: Optional[WebClientServer] = None
 _broadcast_task: Optional[asyncio.Task] = None
@@ -328,8 +327,8 @@ def _install_output_hook(workspace: Any) -> None:
     try:
         for i, session in enumerate(workspace.sessions):
             _attach_pane_hook(i, session)
-    except Exception as e:
-        dbg(f"web output hook install failed: {e}")
+    except Exception:
+        pass
 
 
 def _attach_pane_hook(idx: int, session: Any) -> None:
@@ -339,8 +338,8 @@ def _attach_pane_hook(idx: int, session: Any) -> None:
                 _pane_output_hook(pane_idx, data)
             return hook
         session.stream._on_feed = _make_hook(idx)
-    except Exception as e:
-        dbg(f"web pane hook attach failed for pane {idx}: {e}")
+    except Exception:
+        pass
 
 
 async def stop_web_server() -> None:
@@ -439,8 +438,8 @@ async def _broadcast_loop(server: WebClientServer, ws: Any) -> None:
                 }
                 await server.broadcast("status", status_data)
 
-        except Exception as e:
-            dbg(f"web broadcast error: {e}")
+        except Exception:
+            pass
 
         await asyncio.sleep(0.1)
 

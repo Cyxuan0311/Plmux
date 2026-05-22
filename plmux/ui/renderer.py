@@ -29,15 +29,28 @@ def _build_pane_panel(
     theme: Theme,
     focused: bool,
     title: str,
+    in_copy_mode: bool = False,
 ) -> Panel:
     border = theme.pane_active_border if focused else theme.pane_inactive_border
     tstyle = theme.pane_title_active if focused else theme.pane_title_inactive
     bx = box.SQUARE
-    # support optional copy-mode selection passed via session attributes
-    sel_start = getattr(session, "_copy_sel_start", None)
-    sel_end = getattr(session, "_copy_sel_end", None)
-    copy_cursor = getattr(session, "_copy_cursor_pos", None)
-    body = session.build_render_text(draw_cursor=focused, sel_start=sel_start, sel_end=sel_end, cursor_pos=copy_cursor)
+    sel_start = session.copy_sel_start
+    sel_end = session.copy_sel_end
+    copy_cursor = session.copy_cursor_pos
+    copy_scroll_offset = session.copy_scroll_offset
+    scroll_offset = session.scroll_offset
+    search_matches = session.copy_search_matches
+    effective_offset = copy_scroll_offset if in_copy_mode else scroll_offset
+    if effective_offset > 0:
+        body = session.build_scrollback_render_text(
+            effective_offset,
+            cursor_pos=copy_cursor if in_copy_mode else None,
+            search_matches=search_matches if in_copy_mode else None,
+            sel_start=sel_start if in_copy_mode else None,
+            sel_end=sel_end if in_copy_mode else None,
+        )
+    else:
+        body = session.build_render_text(draw_cursor=focused, sel_start=sel_start, sel_end=sel_end, cursor_pos=copy_cursor)
     return Panel(
         body,
         title=Text(title, style=tstyle),
@@ -48,7 +61,7 @@ def _build_pane_panel(
     )
 
 
-def build_split_layout(tree: Tree, ws: PaneWorkspace, theme: Theme) -> Layout:
+def build_split_layout(tree: Tree, ws: PaneWorkspace, theme: Theme, *, in_copy_mode: bool = False) -> Layout:
     if isinstance(tree, int):
         idx = tree
         return Layout(
@@ -58,13 +71,14 @@ def build_split_layout(tree: Tree, ws: PaneWorkspace, theme: Theme) -> Layout:
                 theme=theme,
                 focused=idx == ws.focus_pane,
                 title=ws.pane_title(idx),
+                in_copy_mode=in_copy_mode,
             ),
             name=f"pane-{idx}",
         )
     direction, ratio, a, b = tree
     root = Layout()
-    left = build_split_layout(a, ws, theme)
-    right = build_split_layout(b, ws, theme)
+    left = build_split_layout(a, ws, theme, in_copy_mode=in_copy_mode)
+    right = build_split_layout(b, ws, theme, in_copy_mode=in_copy_mode)
     left.ratio = max(1, int(ratio * 100))
     right.ratio = max(1, int((1.0 - ratio) * 100))
     if direction == "row":
@@ -247,6 +261,7 @@ def build_root(
 
     # support zoomed single-pane view if workspace requests it
     zoom_idx = getattr(ws, "zoom_pane", None)
+    is_copy = mode.upper() == "COPY"
     if zoom_idx is not None:
         main = Layout(
             _build_pane_panel(
@@ -255,10 +270,11 @@ def build_root(
                 theme=theme,
                 focused=zoom_idx == ws.focus_pane,
                 title=ws.pane_title(zoom_idx),
+                in_copy_mode=is_copy,
             )
         )
     else:
-        main = build_split_layout(ws.tree, ws, theme)
+        main = build_split_layout(ws.tree, ws, theme, in_copy_mode=is_copy)
     status_text = build_status_line(
         ws, platform_name, terminal_width, clock_str=clock_str, mode=mode, extra_items=extra_items
     )

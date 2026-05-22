@@ -10,8 +10,6 @@ import os
 import threading
 from typing import Any, Callable, Optional
 
-from plmux.debug_log import dbg
-
 _STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 
 _WS_MAGIC = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
@@ -33,9 +31,9 @@ except ImportError:
     _HAS_C_KERNEL = False
 
 if _HAS_C_KERNEL:
-    dbg("web: C extension _ws_kernel loaded successfully")
+    pass
 else:
-    dbg("web: C extension _ws_kernel not available, using pure Python fallback")
+    pass
 
 
 def _load_html() -> str:
@@ -427,14 +425,14 @@ class WebClientServer:
                             "data": snapshot_data + reposition,
                             "cursor": [cursor_y, cursor_x],
                         })
-                    except Exception as e:
-                        dbg(f"web pane snapshot error: {e}")
+                    except Exception:
+                        pass
                 try:
                     from plmux.web.server import _build_layout_msg
                     layout_msg = _build_layout_msg(self.ws_ref)
                     await self.broadcast("layout", layout_msg)
-                except Exception as e:
-                    dbg(f"web layout broadcast error: {e}")
+                except Exception:
+                    pass
         elif msg_type == "resize":
             cols = msg.get("cols", 80)
             rows = msg.get("rows", 24)

@@ -127,9 +127,8 @@ def _do_reload_config(ctx: AppContext) -> None:
         to_load = new_enabled - old_enabled
         if to_load:
             load_plugins(list(to_load), new_cfg.extensions.search_paths)
-    except Exception as exc:
-        from plmux.debug_log import dbg
-        dbg(f"reload config failed: {exc}")
+    except Exception:
+        pass
 
 
 def _parse_prefix_key(spec: str) -> str:

@@ -32,9 +32,19 @@ class AppContext:
     copy_cursor: tuple[int, int] | None = None
     copy_pane: int | None = None
     copy_line_mode: bool = False
+    copy_scroll_offset: int = 0
+    copy_search_query: str = ""
+    copy_search_direction: str = ""
+    copy_search_active: bool = False
+    copy_search_matches: list[tuple[int, int, int]] = field(default_factory=list)
+    copy_search_match_idx: int = -1
 
     mouse_dragging: bool = False
     mouse_drag_pane: int | None = None
+    mouse_resize_active: bool = False
+    mouse_resize_start_x: int = 0
+    mouse_resize_start_y: int = 0
+    mouse_resize_tree: Any = None
 
     broadcast_enabled: bool = False
 

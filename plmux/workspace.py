@@ -278,6 +278,7 @@ class PaneWorkspace:
                 shell=shell if shell is not None else self.cfg.shell,
                 env=env if env is not None else self.cfg.env,
                 on_update=self._mark,
+                scrollback_lines=self.cfg.ui.scrollback_lines,
             )
         )
         return idx
