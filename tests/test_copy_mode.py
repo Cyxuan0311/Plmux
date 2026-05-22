@@ -1,9 +1,13 @@
+import sys
 import time
+
+import pytest
 
 from plmux.terminal.session import TerminalSession
 from plmux.app import _extract_selected_text_from_session
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="requires PTY shell (pwsh.exe) not available in CI")
 def test_build_render_text_with_selection():
     s = TerminalSession(4, 20)
     try:
@@ -22,6 +26,7 @@ def test_build_render_text_with_selection():
         s.close()
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="requires PTY shell (pwsh.exe) not available in CI")
 def test_extract_selected_text_reverse():
     s = TerminalSession(4, 20)
     try:

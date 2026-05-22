@@ -1,5 +1,7 @@
 import sys
 
+import pytest
+
 import plmux.app as app
 
 
@@ -38,6 +40,7 @@ def test_send_sequence_mapped():
     assert s.written[-1] == ("text", "\x1b[A")
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="os.name is nt, write_bytes is used")
 def test_send_enter_non_windows(monkeypatch):
     s = DummySession()
     k = KeyObj(is_sequence=True, name="KEY_ENTER")

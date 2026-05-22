@@ -1,7 +1,10 @@
 """Tests for config loader module."""
 
 import json
+import sys
 from unittest.mock import patch
+
+import pytest
 
 from plmux.config.loader import (
     _deep_merge,
@@ -350,6 +353,7 @@ def test_default_user_config_dir_linux(monkeypatch):
     assert str(path).endswith("plmux")
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="XDG paths use POSIX separators")
 def test_default_user_config_dir_with_xdg(monkeypatch):
     monkeypatch.setattr("sys.platform", "linux")
     monkeypatch.setattr("os.name", "posix")
