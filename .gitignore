@@ -9,3 +9,4 @@ plmux.egg-info/
 .benchmark/
 .pytest_cache/
 .mypy_cache/
+.ruf_cache/

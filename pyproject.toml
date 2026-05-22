@@ -34,3 +34,4 @@ plmux = ["themes/*.json", "config/defaults.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+asyncio_mode = "auto"
