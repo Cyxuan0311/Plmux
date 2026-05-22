@@ -3,7 +3,7 @@ from plmux.ui.theme import Theme
 
 
 class DummySession:
-    def __init__(self, rows, cols, shell=None, env=None, on_update=None):
+    def __init__(self, rows, cols, shell=None, env=None, on_update=None, scrollback_lines=10000):
         self.rows = rows
         self.cols = cols
         self.argv = ["/bin/sh"]
