@@ -11,8 +11,6 @@ from typing import Any, Callable, Dict, List, Tuple
 
 import time
 
-from plmux.debug_log import dbg
-
 
 @dataclass
 class ExtensionContext:
@@ -76,8 +74,8 @@ def emit_hook(name: str, ctx: ExtensionContext) -> None:
     for fn in _REGISTRY.get(name, []):
         try:
             fn(ctx)
-        except Exception as exc:
-            dbg(f"hook {name!r} error: {exc}")
+        except Exception:
+            pass
 
 
 def register_command(name: str, fn: Callable) -> None:
@@ -135,10 +133,8 @@ def load_plugins(enabled: List[str], search_paths: List[str]) -> None:
             continue
         module = _find_plugin(plugin_name, search_paths)
         if module is None:
-            dbg(f"plugin {plugin_name!r} not found in search paths")
             continue
         _LOADED_PLUGINS[plugin_name] = module
-        dbg(f"plugin {plugin_name!r} loaded")
 
 
 def _find_plugin(name: str, search_paths: List[str]) -> Any:
@@ -168,8 +164,8 @@ def _find_plugin(name: str, search_paths: List[str]) -> Any:
                 try:
                     spec.loader.exec_module(mod)
                     return mod
-                except Exception as exc:
-                    dbg(f"plugin {name!r} load error from {py_path}: {exc}")
+                except Exception:
+                    pass
     return None
 
 

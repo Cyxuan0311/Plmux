@@ -18,7 +18,7 @@ from rich.live import Live
 
 from plmux.config.loader import load_config
 from plmux.daemon import ServerState
-from plmux.debug_log import PerfTimer, dbg, get_frame_profiler, setup_debug_logging
+from plmux.debug_log import PerfTimer, get_frame_profiler, setup_debug_logging
 from plmux.terminal._c_extension import _fastscreen
 from plmux.extensions.registry import ExtensionContext, emit_hook, load_plugins, get_plugin_status_items, get_plugin_overlay
 from plmux.modes import AppContext
@@ -31,7 +31,6 @@ from plmux.state_bridge import (
 from plmux.daemon import connect_and_receive
 from plmux.terminal.session import TerminalSession, report_session_stats, reset_session_stats
 from plmux.ui.renderer import build_root
-from plmux.ui.geometry import assign_rects
 from plmux.ui.theme import load_theme
 from plmux.workspace import PaneWorkspace, try_load_snapshot
 
@@ -83,27 +82,6 @@ def _match_chord_raw(key, chord_name: str) -> bool:
     return False
 
 
-def _parse_mouse_event(seq: str) -> dict | None:
-    try:
-        if seq.startswith("\x1b[M") and len(seq) >= 6:
-            cb = ord(seq[3]) - 32
-            cx = ord(seq[4]) - 32 - 1
-            cy = ord(seq[5]) - 32 - 1
-            return {"x": cx, "y": cy, "button": cb}
-        if seq.startswith("\x1b[<"):
-            import re
-            m = re.match(r"\x1b\[<(\d+);(\d+);(\d+)([mM])", seq)
-            if m:
-                b = int(m.group(1))
-                x = int(m.group(2)) - 1
-                y = int(m.group(3)) - 1
-                typ = m.group(4)
-                return {"x": x, "y": y, "button": b, "type": typ}
-    except Exception:
-        return None
-    return None
-
-
 class _InputReader:
     """Background thread that reads keyboard input into a queue.
 
@@ -121,6 +99,7 @@ class _InputReader:
         self._thread.start()
 
     def _loop(self) -> None:
+        from plmux.app.mouse_handler import SGR_MOUSE_RE, make_mouse_keystroke
         is_win = sys.platform == "win32" or os.name == "nt"
         while not self._stop.is_set():
             try:
@@ -135,6 +114,10 @@ class _InputReader:
                 else:
                     key = self._term.inkey(timeout=0.016)
                     if key:
+                        if str(key).startswith("\x1b[<"):
+                            m = SGR_MOUSE_RE.match(str(key))
+                            if m:
+                                key = make_mouse_keystroke(str(key), m)
                         self._queue.put(key)
             except Exception:
                 self._stop.wait(0.005)
@@ -205,7 +188,7 @@ async def async_main(
 ) -> ServerState | None:
     cfg = load_config(config_path)
     theme = load_theme(cfg.theme)
-    term = Terminal()
+    term = Terminal(force_styling=True)
     console = Console(force_terminal=True)
 
     if sys.platform == "win32" or os.name == "nt":
@@ -326,16 +309,16 @@ async def async_main(
                 from plmux.web.server import start_web_server
                 await start_web_server(ctx.ws, port=port)
                 ctx.dirty = True
-            except Exception as e:
-                dbg(f"web server start failed: {e}")
+            except Exception:
+                pass
         if ctx._pending_web_stop:
             ctx._pending_web_stop = False
             try:
                 from plmux.web.server import stop_web_server
                 await stop_web_server()
                 ctx.dirty = True
-            except Exception as e:
-                dbg(f"web server stop failed: {e}")
+            except Exception:
+                pass
 
     def persist() -> None:
         buffer_dumps: dict[str, str] = {}
@@ -361,6 +344,17 @@ async def async_main(
             screen=cfg.ui.use_alternate_screen,
             refresh_per_second=refresh,
         ) as live:
+            try:
+                from blessed.dec_modes import DecPrivateMode
+                term._dec_mode_set_enabled(
+                    DecPrivateMode.MOUSE_EXTENDED_SGR,
+                    DecPrivateMode.MOUSE_REPORT_DRAG,
+                )
+            except Exception:
+                term.stream.write("\x1b[?1002h\x1b[?1006h")
+                term.stream.flush()
+                term._dec_mode_cache[1006] = 1
+                term._dec_mode_cache[1002] = 1
             input_reader = _InputReader(term)
             frame_count = 0
             plugins_loaded = False
@@ -424,47 +418,20 @@ async def async_main(
                             to_load = new_enabled - old_enabled
                             if to_load:
                                 load_plugins(list(to_load), new_cfg.extensions.search_paths)
-                            dbg("config reloaded (file change detected)")
-                        except Exception as exc:
-                            dbg(f"config reload failed: {exc}")
+                        except Exception:
+                            pass
                         ctx.dirty = True
 
                     for key in keys:
-                        if isinstance(key, str) and ("\x1b[<" in key or "\x1b[M" in key):
-                            me = _parse_mouse_event(key)
-                            if me is not None:
-                                try:
-                                    rects = assign_rects(ctx.ws.tree, 0, 0, inner_rows, inner_cols)
-                                    for idx, r in rects.items():
-                                        if r.row <= me["y"] < (r.row + r.rows) and r.col <= me["x"] < (r.col + r.cols):
-                                            ctx.ws.focus_pane = idx
-                                            ctx.dirty = True
-                                            local_y = me["y"] - r.row
-                                            local_x = me["x"] - r.col
-                                            if ctx.mode == "copy":
-                                                ctx.copy_cursor = (
-                                                    max(0, min(local_y, ctx.ws.sessions[idx].rows - 1)),
-                                                    max(0, min(local_x, ctx.ws.sessions[idx].cols - 1)),
-                                                )
-                                                ctx.copy_pane = idx
-                                                setattr(ctx.ws.sessions[idx], "_copy_sel_end", ctx.copy_cursor)
-                                            typ = me.get("type")
-                                            if typ == "M":
-                                                ctx.mouse_dragging = True
-                                                ctx.mouse_drag_pane = idx
-                                                if ctx.mode != "copy":
-                                                    ctx.mode = "copy"
-                                                    ctx.copy_anchor = ctx.copy_cursor
-                                                    ctx.copy_pane = idx
-                                                    setattr(ctx.ws.sessions[idx], "_copy_sel_start", ctx.copy_anchor)
-                                                    setattr(ctx.ws.sessions[idx], "_copy_sel_end", ctx.copy_cursor)
-                                            elif typ == "m":
-                                                ctx.mouse_dragging = False
-                                                ctx.mouse_drag_pane = None
-                                            break
-                                except Exception:
-                                    pass
-                        dispatch_key(key, ctx)
+                        from plmux.app.mouse_handler import handle_mouse_event
+                        mouse_handled = handle_mouse_event(key, ctx, ctx.ws, inner_rows, inner_cols)
+                        if not mouse_handled:
+                            if ctx.mode == "normal" and ctx.ws and ctx.ws.focus_pane is not None:
+                                fs = ctx.ws.sessions[ctx.ws.focus_pane]
+                                if fs.scroll_offset > 0:
+                                    fs.scroll_offset = 0
+                                    ctx.dirty = True
+                            dispatch_key(key, ctx)
                         TerminalSession.pump_all_sessions(ctx.ws.sessions)
 
                     try:
@@ -509,7 +476,24 @@ async def async_main(
                         if getattr(ctx.ws, "zoom_pane", None) is not None:
                             extra_items.append(("ZOOM", ctx.ws.theme.status_win_style, "left"))
                         if ctx.mode == "copy":
-                            extra_items.append(("COPY", ctx.ws.theme.status_pane_style, "left"))
+                            s_copy = ctx.ws.active_session() if ctx.copy_pane is None else ctx.ws.sessions[ctx.copy_pane]
+                            sb_len = s_copy.scrollback_len
+                            offset = ctx.copy_scroll_offset
+                            copy_label = "COPY"
+                            if sb_len > 0 and offset > 0:
+                                copy_label = f"COPY ↑{offset}/{sb_len}"
+                            if ctx.copy_search_query:
+                                n_matches = len(ctx.copy_search_matches)
+                                copy_label += f" /{ctx.copy_search_query}({n_matches})"
+                            if ctx.copy_search_active:
+                                copy_label = f"SEARCH: {ctx.copy_search_query}_"
+                            extra_items.append((copy_label, ctx.ws.theme.status_pane_style, "left"))
+                        elif ctx.mode == "normal" and ctx.ws and ctx.ws.focus_pane is not None:
+                            fs = ctx.ws.sessions[ctx.ws.focus_pane]
+                            so = fs.scroll_offset
+                            if so > 0:
+                                sb_len = fs.scrollback_len
+                                extra_items.append((f"↑{so}/{sb_len}", ctx.ws.theme.status_pane_style, "left"))
                         extra_items.extend(get_plugin_status_items())
                         root = await asyncio.to_thread(
                             build_root,
@@ -565,6 +549,17 @@ async def async_main(
                     sleep_time = max(0.001, poll_interval - elapsed)
                     await asyncio.sleep(sleep_time)
             finally:
+                try:
+                    from blessed.dec_modes import DecPrivateMode
+                    term._dec_mode_set_disabled(
+                        DecPrivateMode.MOUSE_EXTENDED_SGR,
+                        DecPrivateMode.MOUSE_REPORT_DRAG,
+                    )
+                except Exception:
+                    term.stream.write("\x1b[?1002l\x1b[?1006l\x1b[?1000l")
+                    term.stream.flush()
+                    term._dec_mode_cache.pop(1006, None)
+                    term._dec_mode_cache.pop(1002, None)
                 input_reader.stop()
                 config_watcher.stop()
 

@@ -15,6 +15,7 @@ class UIConfig:
     command_line_height: int = 1
     min_pane_rows: int = 3
     min_pane_cols: int = 10
+    scrollback_lines: int = 10000
 
 
 @dataclass
