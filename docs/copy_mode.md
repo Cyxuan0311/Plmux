@@ -26,6 +26,8 @@ Copy mode 允许你在终端中选择和复制文本内容。
 
 在窗格中点击并拖拽会自动进入 copy mode 并创建选区。选区锚点设置在点击位置，光标跟随拖拽。释放鼠标按钮结束拖拽但保持在 copy mode 中 — 按 `y` 复制或 `Esc`/`q` 退出。
 
+在 copy mode 中使用鼠标滚轮可以上下滚动回滚缓冲区内容。当滚动到最底部时，自动退出 copy mode 回到正常模式。
+
 ## 实现细节
 
 ### 选区表示
@@ -37,7 +39,7 @@ Copy mode 允许你在终端中选择和复制文本内容。
 ### 渲染
 
 - 选中文本应用 `reverse` 样式高亮
-- 选区边界存储在 session 的 `_copy_sel_start` 和 `_copy_sel_end` 属性中
+- 选区边界通过 TerminalSession 的公共属性 `copy_sel_start` 和 `copy_sel_end` 管理
 
 ### 剪贴板集成
 

@@ -26,6 +26,8 @@ Copy mode allows you to select and copy text content from the terminal.
 
 Clicking and dragging in a pane automatically enters copy mode and creates a selection. The selection anchor is set at the click position, and the cursor follows the drag. Releasing the mouse button ends the drag but stays in copy mode — press `y` to yank or `Esc`/`q` to exit.
 
+In copy mode, the mouse scroll wheel scrolls through the scrollback buffer. Scrolling to the very bottom automatically exits copy mode and returns to normal mode.
+
 ## Implementation Details
 
 ### Selection Representation
@@ -37,7 +39,7 @@ Clicking and dragging in a pane automatically enters copy mode and creates a sel
 ### Rendering
 
 - Selected text is highlighted with the `reverse` style
-- Selection boundaries are stored in the session's `_copy_sel_start` and `_copy_sel_end` attributes
+- Selection boundaries are managed through TerminalSession's public properties `copy_sel_start` and `copy_sel_end`
 
 ### Clipboard Integration
 

@@ -18,7 +18,7 @@
 
 
 
-A lightweight, cross-platform terminal multiplexer inspired by tmux, built with Python, Rich, and C extensions. It provides pane splitting, window management, copy mode, a vim-style command interface, dynamic status bar with foreground process display, 36 built-in themes, session persistence, a browser-based web client, a tmux-like plugin extension system, and hot-reloadable configuration.
+A lightweight, cross-platform terminal multiplexer inspired by tmux, built with Python, Rich, and C extensions. It provides pane splitting, window management, mouse support (scroll, click-to-focus, drag-to-resize), copy mode, a vim-style command interface, dynamic status bar with foreground process display, 36 built-in themes, session persistence, a browser-based web client, a tmux-like plugin extension system, and hot-reloadable configuration.
 
 <div align="center">
   <img src="resource/demo.png" alt="plmux demo" />
@@ -29,6 +29,7 @@ A lightweight, cross-platform terminal multiplexer inspired by tmux, built with 
 
 - **Pane Splitting**: Vertical and horizontal splits with adjustable ratios
 - **Window Management**: Multiple windows with layout cycling
+- **Mouse Support**: Scroll wheel to scroll pane content, click to switch focus, drag borders to resize panes; automatically forwards mouse events to child programs (e.g. vim, less)
 - **Zoom**: Toggle any pane to fullscreen and back
 - **Layout Templates**: 10 built-in layout templates (even-horizontal, main-vertical, quad, columns, etc.)
 - **Copy Mode**: Text selection and clipboard integration
@@ -94,6 +95,16 @@ All key bindings are prefixed by **Ctrl+B** (configurable). See [Key Bindings](d
 | Detach session | Prefix + `d` |
 | Close window | Prefix + `&` |
 | Force quit | `Ctrl+Q` |
+
+### Mouse Operations
+
+| Action | Description |
+|--------|-------------|
+| Scroll wheel up/down | Scroll pane content (scrollback buffer) |
+| Left click on pane | Switch focus to that pane |
+| Left click on border | Begin pane resize drag |
+| Drag on border | Resize adjacent panes |
+| Mouse events in child programs | Automatically forwarded when child enables mouse mode |
 
 ### Copy Mode
 
@@ -162,12 +173,14 @@ See [Plugins](docs/plugins.md) for full documentation.
 
 ## Architecture
 
-plmux uses C extensions for performance-critical paths:
+plmux uses C extensions for performance-critical paths and a modular architecture for maintainability:
 
 - **FastScreen** (`plmux/terminal/_c_extension/`): ANSI parsing, screen state management, and rendering — falls back to a pure-Python pyte backend when unavailable
 - **WebSocket Kernel** (`plmux/web/_c_extension/`): Frame parsing and encoding for browser terminal — falls back to pure-Python WebSocket when unavailable
+- **Mouse Handler** (`plmux/app/mouse_handler.py`): Decoupled mouse event processing — scroll, click-to-focus, drag-to-resize, and child program mouse forwarding
+- **Terminal Session** (`plmux/terminal/session.py`): PTY-backed terminal with public API for scroll offset, copy mode state, and scrollback buffer management
 
-Both extensions are optional; plmux works without them using Python fallbacks.
+Both C extensions are optional; plmux works without them using Python fallbacks.
 
 ## License
 

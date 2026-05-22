@@ -63,6 +63,23 @@ Implementation: [schema.py](../plmux/config/schema.py) | [prefix.py](../plmux/mo
 | `Ctrl+Q` | Force quit plmux |
 | `Esc` | Enter escape-wait state; if followed by `:`, enters command mode |
 
+## Mouse Operations
+
+plmux supports mouse interaction via SGR mouse protocol (DEC mode 1006). Mouse events are automatically enabled on startup.
+
+Implementation: [mouse_handler.py](../plmux/app/mouse_handler.py)
+
+| Action | Description |
+|--------|-------------|
+| Scroll wheel up | Scroll pane content up (scrollback buffer) |
+| Scroll wheel down | Scroll pane content down |
+| Left click on pane | Switch focus to the clicked pane |
+| Left click on border | Begin pane resize drag |
+| Drag on border | Resize adjacent panes proportionally |
+| Mouse events in child programs | Automatically forwarded when the child program enables mouse mode (e.g. vim mouse mode, less scrolling) |
+
+When a child program (such as vim with `set mouse=a`) enables mouse mode, plmux detects this and forwards all mouse events directly to that program instead of handling them itself.
+
 ## Copy Mode
 
 Copy mode uses vim-like key bindings for text navigation and selection.
