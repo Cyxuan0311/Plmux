@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 from typing import Any, Dict
 
 from plmux.config.loader import default_user_config_dir
 from plmux.config.schema import PlmuxConfig
-from plmux.session.models import SessionSnapshot, tree_from_json, tree_to_json
+from plmux.session.models import SessionSnapshot, tree_to_json
 
 
 def resolve_state_path(cfg: PlmuxConfig) -> Path:

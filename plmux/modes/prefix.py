@@ -1,57 +1,79 @@
-"""Prefix mode handler: ^B + key chord dispatcher."""
+"""Prefix mode handler: ^B + key chord dispatcher (configurable bindings)."""
 
 from __future__ import annotations
 
 from plmux.modes import AppContext
 
 
+def _build_key_action_map(bindings: dict[str, list[str]]) -> dict[str, str]:
+    key_map: dict[str, str] = {}
+    for action, keys in bindings.items():
+        for k in keys:
+            key_map[k] = action
+    return key_map
+
+
 def handle_prefix_mode(key, ctx: AppContext) -> None:
     ctx.mode = "normal"
     ch = str(key)
 
-    if ch == "%" or ch == "v":
+    key_map = _build_key_action_map(ctx.cfg.keys.bindings)
+    action = key_map.get(ch)
+
+    if key.name == "KEY_LEFT":
+        action = action or "focus-left"
+    elif key.name == "KEY_RIGHT":
+        action = action or "focus-right"
+    elif key.name == "KEY_UP":
+        action = action or "focus-up"
+    elif key.name == "KEY_DOWN":
+        action = action or "focus-down"
+
+    if ch in "0123456789" and action is None:
+        ctx.ws.goto_window(int(ch))
+    elif action == "split-vertical":
         ctx.ws.split("row")
-    elif ch == '"' or ch == "s":
+    elif action == "split-horizontal":
         ctx.ws.split("col")
-    elif ch == "o":
+    elif action == "only-pane":
         ctx.ws.only_pane()
-    elif ch == "n":
+    elif action == "next-window":
         ctx.ws.next_window()
-    elif ch == "[":
-        _enter_copy_mode(ctx)
-    elif ch == "p":
+    elif action == "prev-window":
         ctx.ws.prev_window()
-    elif ch == "c":
+    elif action == "new-window":
         ctx.ws.new_window()
-    elif ch == "&":
+    elif action == "close-window":
         if not ctx.ws.close_window():
             ctx.running = False
-    elif ch in "0123456789":
-        ctx.ws.goto_window(int(ch))
-    elif ch == " ":
+    elif action == "copy-mode":
+        _enter_copy_mode(ctx)
+    elif action == "cycle-layout":
         ctx.ws.cycle_layout()
-    elif ch == "?":
+    elif action == "help":
         ctx.mode = "help"
         ctx.help_tab = 0
-    elif ch == "d":
+    elif action == "detach":
         ctx.detach_requested = True
         ctx.running = False
-    elif key.name == "KEY_LEFT" or ch == "h":
+    elif action == "focus-left":
         ctx.ws.focus_prev()
-    elif key.name == "KEY_RIGHT" or ch == "l":
+    elif action == "focus-right":
         ctx.ws.focus_next()
-    elif key.name == "KEY_UP" or ch == "k":
+    elif action == "focus-up":
         ctx.ws.focus_prev()
-    elif key.name == "KEY_DOWN" or ch == "j":
+    elif action == "focus-down":
         ctx.ws.focus_next()
-    elif ch == "H":
+    elif action == "resize-left":
         ctx.ws.resize_pane("left")
-    elif ch == "L":
+    elif action == "resize-right":
         ctx.ws.resize_pane("right")
-    elif ch == "K":
+    elif action == "resize-up":
         ctx.ws.resize_pane("up")
-    elif ch == "J":
+    elif action == "resize-down":
         ctx.ws.resize_pane("down")
+    elif action == "zoom":
+        ctx.ws.toggle_zoom()
     ctx.dirty = True
 
 

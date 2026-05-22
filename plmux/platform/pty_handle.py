@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import struct
 import sys
+import threading
 from typing import Any
 
 try:
@@ -18,7 +19,10 @@ def _is_windows() -> bool:
 
 
 class PtyHandle:
-    __slots__ = ("_fd", "_pid", "_win", "_sock", "_proc", "_session_index", "_closed")
+    __slots__ = (
+        "_fd", "_pid", "_win", "_sock", "_proc", "_session_index", "_closed",
+        "_read_buf", "_read_lock", "_sock_owner", "_write_lock",
+    )
 
     def __init__(self, fd: int, pid: int, *, _sock: Any = None, _proc: Any = None) -> None:
         self._fd = fd
@@ -28,6 +32,10 @@ class PtyHandle:
         self._proc = _proc
         self._session_index = -1
         self._closed = False
+        self._read_buf = bytearray()
+        self._read_lock = threading.Lock()
+        self._sock_owner = False
+        self._write_lock: threading.Lock | None = None
 
     @property
     def pid(self) -> int:
@@ -41,6 +49,21 @@ class PtyHandle:
             self._send_command(0x01, data)
             return
         os.write(self._fd, data)
+
+    def read(self, size: int = 65536) -> bytes:
+        if self._win and self._sock is not None:
+            with self._read_lock:
+                if self._read_buf:
+                    data = bytes(self._read_buf[:size])
+                    self._read_buf = self._read_buf[size:]
+                    return data
+            return b""
+        if self._win and self._proc is not None:
+            data = self._proc.read(size)
+            if isinstance(data, str):
+                data = data.encode("utf-8", errors="replace")
+            return data
+        return os.read(self._fd, size)
 
     def setwinsize(self, rows: int, cols: int) -> None:
         if self._win and self._sock is not None:
@@ -67,10 +90,11 @@ class PtyHandle:
         self._closed = True
         if self._win and self._sock is not None:
             self._send_command(0x03, b"")
-            try:
-                self._sock.close()
-            except OSError:
-                pass
+            if self._sock_owner:
+                try:
+                    self._sock.close()
+                except OSError:
+                    pass
             return
         if self._win and self._proc is not None:
             try:
@@ -85,7 +109,7 @@ class PtyHandle:
 
     def isalive(self) -> bool:
         if self._win and self._sock is not None:
-            return True
+            return not self._closed
         if self._win and self._proc is not None:
             try:
                 return self._proc.isalive()
@@ -100,8 +124,64 @@ class PtyHandle:
     def _send_command(self, cmd: int, payload: bytes) -> None:
         if self._sock is None:
             return
+        lock = self._write_lock
+        frame = struct.pack("!iBi", self._session_index, cmd, len(payload)) + payload
         try:
-            frame = struct.pack("!iBi", self._session_index, cmd, len(payload)) + payload
-            self._sock.sendall(frame)
+            if lock is not None:
+                with lock:
+                    self._sock.sendall(frame)
+            else:
+                self._sock.sendall(frame)
         except OSError:
             pass
+
+    def feed_proxy_data(self, data: bytes) -> None:
+        with self._read_lock:
+            self._read_buf.extend(data)
+
+
+def start_proxy_reader(sock: Any, handles: list[PtyHandle]) -> threading.Thread | None:
+    if not _is_windows() or sock is None:
+        return None
+
+    write_lock = threading.Lock()
+    if handles:
+        handles[0]._sock_owner = True
+
+    for h in handles:
+        h._write_lock = write_lock
+
+    def _reader() -> None:
+        sock.settimeout(0.5)
+        buf = bytearray()
+        while True:
+            try:
+                chunk = sock.recv(65536)
+                if not chunk:
+                    break
+                buf.extend(chunk)
+
+                while len(buf) >= 9:
+                    session_id, cmd, payload_len = struct.unpack("!iBi", bytes(buf[:9]))
+                    frame_size = 9 + payload_len
+                    if len(buf) < frame_size:
+                        break
+
+                    payload = bytes(buf[9:frame_size])
+                    buf = buf[frame_size:]
+
+                    if cmd == 0x81 and 0 <= session_id < len(handles):
+                        handles[session_id].feed_proxy_data(payload)
+
+            except (OSError, EOFError):
+                break
+            except Exception:
+                import time
+                time.sleep(0.01)
+
+        for h in handles:
+            h._closed = True
+
+    t = threading.Thread(target=_reader, name="plmux-proxy-reader", daemon=True)
+    t.start()
+    return t

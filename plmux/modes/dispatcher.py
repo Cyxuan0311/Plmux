@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from plmux.extensions.registry import get_plugin_mode_handler
 from plmux.modes import AppContext
 from plmux.modes.normal import handle_normal_mode
 from plmux.modes.prefix import handle_prefix_mode
@@ -31,7 +32,13 @@ _MODE_HANDLERS = {
 
 def dispatch_key(key, ctx: AppContext) -> None:
     prev_mode = ctx.mode
-    handler = _MODE_HANDLERS.get(ctx.mode, handle_normal_mode)
+    handler = _MODE_HANDLERS.get(ctx.mode)
+    if handler is None:
+        plugin_handler = get_plugin_mode_handler(ctx.mode)
+        if plugin_handler is not None:
+            handler = plugin_handler
+        else:
+            handler = handle_normal_mode
     handler(key, ctx)
     if ctx.mode != prev_mode:
         try:

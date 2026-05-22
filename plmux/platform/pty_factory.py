@@ -3,21 +3,17 @@
 from __future__ import annotations
 
 import os
-from typing import Any, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
 from plmux.platform.shell import (
-    default_shell_argv,
-    resolve_shell_argv,
     ensure_interactive_shell,
 )
-from plmux.platform.pty_handle import PtyHandle
 
 try:
     import termios
 except ImportError:
     termios = None  # type: ignore[assignment]
 
-from plmux.debug_log import dbg
 
 if os.name != "nt":
     from ptyprocess import PtyProcess

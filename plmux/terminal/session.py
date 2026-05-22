@@ -21,9 +21,10 @@ from plmux.terminal.fastscreen import FastScreen as Screen, FastStream as ByteSt
 from rich.console import Console
 from rich.measure import Measurement
 from rich.segment import Segment
-from rich.text import Text
 
-from plmux.platform.pty_factory import PtyHandle, resolve_shell_argv, spawn_pty
+from plmux.platform.pty_factory import spawn_pty
+from plmux.platform.pty_handle import PtyHandle
+from plmux.platform.shell import resolve_shell_argv
 from plmux.terminal.pyte_render import _cursor_overlay_style, _safe_glyph
 from plmux.debug_log import PerfStats, PerfTimer, perf_dbg
 
@@ -99,6 +100,7 @@ class TerminalSession:
         )
         self._closed = False
         self._pty_nonblocking = False
+        self._app_cursor_keys = False
         self._screen_lock = threading.Lock()
         self._read_queue: queue.Queue[bytes] = queue.Queue()
         self._reader_thread = threading.Thread(
@@ -134,6 +136,7 @@ class TerminalSession:
         self.proc = PtyHandle(fd, pid, _sock=_sock)
         self._closed = False
         self._pty_nonblocking = False
+        self._app_cursor_keys = False
         self._screen_lock = threading.Lock()
         self._read_queue = queue.Queue()
         self._reader_thread = threading.Thread(
@@ -195,7 +198,7 @@ class TerminalSession:
                     ["ps", "-o", "comm=", "-g", pgid],
                     capture_output=True, text=True, timeout=0.5,
                 )
-                lines = [l.strip() for l in result2.stdout.strip().splitlines() if l.strip()]
+                lines = [line.strip() for line in result2.stdout.strip().splitlines() if line.strip()]
                 if lines:
                     return os.path.basename(lines[-1])
             except Exception:
@@ -272,9 +275,25 @@ class TerminalSession:
     def fileno(self) -> int:
         return self.proc.fileno()
 
+    _DECSET_RE = re.compile(rb"\x1b\[\?(\d+)h")
+    _DECRST_RE = re.compile(rb"\x1b\[\?(\d+)l")
+
+    def _detect_modes(self, data: bytes) -> None:
+        for m in self._DECSET_RE.finditer(data):
+            if m.group(1) == b"1":
+                self._app_cursor_keys = True
+        for m in self._DECRST_RE.finditer(data):
+            if m.group(1) == b"1":
+                self._app_cursor_keys = False
+        if b"\x1b=" in data:
+            self._app_cursor_keys = True
+        if b"\x1b>" in data:
+            self._app_cursor_keys = False
+
     def feed(self, data: bytes) -> None:
         if not data:
             return
+        self._detect_modes(data)
         t = PerfTimer()
         self.stream.feed(data)
         ms = t.elapsed_ms()
@@ -359,6 +378,7 @@ class TerminalSession:
                 data = self._read_queue.get_nowait()
             except queue.Empty:
                 break
+            self._detect_modes(data)
             self.stream.feed(data)
             had_data = True
         if had_data and self._on_update:
@@ -395,6 +415,7 @@ class TerminalSession:
                 data = self._read_queue.get_nowait()
             except queue.Empty:
                 break
+            self._detect_modes(data)
             t_feed = PerfTimer()
             self.stream.feed(data)
             feed_ms = t_feed.elapsed_ms()

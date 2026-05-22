@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Literal
-
-Mode = Literal["normal", "prefix", "cmdline", "help", "esc_wait", "copy", "theme_list", "session_list", "plugin_list", "layout_list"]
+from typing import Any
 
 
 @dataclass
@@ -16,7 +14,7 @@ class AppContext:
     term: Any = None
     console: Any = None
 
-    mode: Mode = "normal"
+    mode: str = "normal"
     cmd_buffer: str = ""
     help_tab: int = 0
     theme_list_cursor: int = 0
@@ -49,6 +47,10 @@ class AppContext:
     sigint_flagged: bool = False
     hard_quit_requested: bool = False
     completion_hints: str = ""
+    config_reload_pending: bool = False
+    theme_search_query: str = ""
+
+    plugin_state: dict = field(default_factory=dict)
 
     def mark_dirty(self) -> None:
         self.dirty = True
