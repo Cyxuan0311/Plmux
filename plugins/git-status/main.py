@@ -74,7 +74,9 @@ def _compute_git_status(cwd: str) -> tuple[str, str] | None:
 
 
 def refresh_git_status(ctx: ExtensionContext) -> None:
-    cwd = os.getcwd()
+    cwd = ctx.cwd or os.getcwd()
+    if not cwd:
+        return
     now = time.monotonic()
 
     cached = _cache.get(cwd)

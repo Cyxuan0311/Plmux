@@ -39,9 +39,9 @@ Displays the current git branch and working tree status in the status bar.
 
 ### battery-status
 
-Displays the current battery percentage and charging state in the status bar.
+Displays the current battery percentage, charging state, and CPU usage on the right side of the status bar.
 
-**Status bar display:**
+**Battery status bar display:**
 
 | State | Example | Color |
 |-------|---------|-------|
@@ -52,9 +52,18 @@ Displays the current battery percentage and charging state in the status bar.
 | Low (<25%) | `○12%` | Red |
 | No battery | _(hidden)_ | — |
 
-**Platform support:** Linux (sysfs) and macOS (pmset).
+**CPU usage status bar display:**
 
-**Performance:** Results are cached for 10 seconds since battery level changes slowly.
+| Range | Example | Color |
+|-------|---------|-------|
+| ≤50% | `▲12%` | Green |
+| 51-80% | `▲65%` | Yellow |
+| >80% | `▲92%` | Red |
+| Unavailable | _(hidden)_ | — |
+
+**Platform support:** Linux (sysfs + /proc/stat), macOS (pmset + top), and Windows (wmic).
+
+**Performance:** Results are cached for 10 seconds since battery and CPU levels change slowly.
 
 ## Enabling Plugins
 
@@ -87,6 +96,12 @@ def on_status_refresh(ctx: ExtensionContext) -> None:
 register_hook("status_refresh", on_status_refresh)
 ```
 
+Items can also be placed on the right side of the status bar using `position="right"`:
+
+```python
+register_status_item("my:info", "bold #85c751 on #75715e", position="right")
+```
+
 ### Available Hooks
 
 | Hook | When |
@@ -110,6 +125,6 @@ register_hook("status_refresh", on_status_refresh)
 - `register_hook(name, fn)` — Register a hook handler
 - `register_command(name, fn)` — Register a `:command`
 - `register_key_binding(key, fn)` — Register a key binding
-- `register_status_item(text, style)` — Add an item to the status bar
+- `register_status_item(text, style, position="left")` — Add an item to the status bar
 
 See the [Plugin System documentation](../docs/plugins.md) for the full API reference.
