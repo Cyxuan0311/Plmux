@@ -21,6 +21,28 @@ class UIConfig:
 class KeysConfig:
     prefix: str = "ctrl+b"
     command_line: str = ":"
+    bindings: Dict[str, List[str]] = field(default_factory=lambda: {
+        "split-vertical": ["%", "v"],
+        "split-horizontal": ['"', "s"],
+        "only-pane": ["o"],
+        "next-window": ["n"],
+        "prev-window": ["p"],
+        "new-window": ["c"],
+        "close-window": ["&"],
+        "copy-mode": ["["],
+        "cycle-layout": [" "],
+        "help": ["?"],
+        "detach": ["d"],
+        "focus-left": ["h"],
+        "focus-right": ["l"],
+        "focus-up": ["k"],
+        "focus-down": ["j"],
+        "resize-left": ["H"],
+        "resize-right": ["L"],
+        "resize-up": ["K"],
+        "resize-down": ["J"],
+        "zoom": ["z"],
+    })
 
 
 @dataclass

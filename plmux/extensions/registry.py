@@ -7,8 +7,7 @@ import importlib.util
 import os
 import sys
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Tuple
 
 import time
 
@@ -26,6 +25,7 @@ class ExtensionContext:
     mode: str = ""
     command: str = ""
     message: str = ""
+    cwd: str = ""
 
 
 Hook = Callable[[ExtensionContext], None]
@@ -50,7 +50,9 @@ _REGISTRY: Dict[str, List[Hook]] = {name: [] for name in _BUILTIN_HOOKS}
 
 _PLUGIN_COMMANDS: Dict[str, Callable] = {}
 _PLUGIN_KEY_BINDINGS: Dict[str, Callable] = {}
-_PLUGIN_STATUS_ITEMS: Dict[str, Tuple[str, str]] = {}
+_PLUGIN_STATUS_ITEMS: Dict[str, Tuple[str, str, str]] = {}
+_PLUGIN_OVERLAYS: Dict[str, Callable] = {}
+_PLUGIN_MODE_HANDLERS: Dict[str, Callable] = {}
 _LOADED_PLUGINS: Dict[str, Any] = {}
 
 _THROTTLED_HOOKS: Dict[str, float] = {
@@ -94,17 +96,37 @@ def get_plugin_key_bindings() -> Dict[str, Callable]:
     return dict(_PLUGIN_KEY_BINDINGS)
 
 
-def register_status_item(name: str, style: str) -> None:
+def register_status_item(name: str, style: str, position: str = "left") -> None:
     prefix = name.split(":")[0] + ":" if ":" in name else ""
     if prefix:
         to_remove = [k for k in _PLUGIN_STATUS_ITEMS if k.startswith(prefix)]
         for k in to_remove:
             del _PLUGIN_STATUS_ITEMS[k]
-    _PLUGIN_STATUS_ITEMS[name] = (name, style)
+    _PLUGIN_STATUS_ITEMS[name] = (name, style, position)
 
 
-def get_plugin_status_items() -> List[Tuple[str, str]]:
+def get_plugin_status_items() -> List[Tuple[str, str, str]]:
     return list(_PLUGIN_STATUS_ITEMS.values())
+
+
+def register_overlay(name: str, builder_fn: Callable) -> None:
+    _PLUGIN_OVERLAYS[name] = builder_fn
+
+
+def get_plugin_overlay(name: str) -> Callable | None:
+    return _PLUGIN_OVERLAYS.get(name)
+
+
+def get_plugin_overlay_names() -> List[str]:
+    return list(_PLUGIN_OVERLAYS.keys())
+
+
+def register_mode_handler(mode_name: str, handler_fn: Callable) -> None:
+    _PLUGIN_MODE_HANDLERS[mode_name] = handler_fn
+
+
+def get_plugin_mode_handler(mode_name: str) -> Callable | None:
+    return _PLUGIN_MODE_HANDLERS.get(mode_name)
 
 
 def load_plugins(enabled: List[str], search_paths: List[str]) -> None:

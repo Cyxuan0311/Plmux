@@ -11,7 +11,29 @@
   },
   "keys": {
     "prefix": "ctrl+b",
-    "command_line": ":"
+    "command_line": ":",
+    "bindings": {
+      "split-vertical": ["%", "v"],
+      "split-horizontal": ["\"", "s"],
+      "only-pane": ["o"],
+      "next-window": ["n"],
+      "prev-window": ["p"],
+      "new-window": ["c"],
+      "close-window": ["&"],
+      "copy-mode": ["["],
+      "cycle-layout": [" "],
+      "help": ["?"],
+      "detach": ["d"],
+      "focus-left": ["h"],
+      "focus-right": ["l"],
+      "focus-up": ["k"],
+      "focus-down": ["j"],
+      "resize-left": ["H"],
+      "resize-right": ["L"],
+      "resize-up": ["K"],
+      "resize-down": ["J"],
+      "zoom": ["z"]
+    }
   },
   "session": {
     "auto_save": true,

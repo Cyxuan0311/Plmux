@@ -35,7 +35,7 @@ async def _handle_client_connection(
             print(f"[DAEMON] session[{i}]: index={s.index}, fd={s.fd}, pid={s.pid}, rows={s.rows}, cols={s.cols}", flush=True)
         await loop.sock_sendall(client, struct.pack("!I", len(data)))
         send_fds(client, data, fds)
-        print(f"[DAEMON] state sent successfully", flush=True)
+        print("[DAEMON] state sent successfully", flush=True)
     except (BrokenPipeError, ConnectionResetError):
         pass
     finally:
@@ -71,14 +71,10 @@ async def _proxy_pty_loop(
     procs: List[Any],
     loop: asyncio.AbstractEventLoop,
 ) -> None:
+    import queue
+    import threading as _threading
+
     client.setblocking(False)
-    for p in procs:
-        fd = getattr(p, "fd", None)
-        if fd is not None:
-            try:
-                os.set_blocking(fd, False)
-            except OSError:
-                pass
 
     header_buf = bytearray()
 
@@ -104,38 +100,40 @@ async def _proxy_pty_loop(
         except OSError:
             pass
 
-    async def _read_ptys() -> None:
-        async def _read_one(si: int, p: Any) -> None:
-            try:
-                chunk = await asyncio.wait_for(
-                    asyncio.to_thread(p.read, 65536),
-                    timeout=0.02,
-                )
-                if chunk:
-                    await _send_frame(si, 0x81, chunk)
-            except (asyncio.TimeoutError, EOFError, OSError, Exception):
-                pass
+    pty_queue: queue.Queue = queue.Queue()
 
-        tasks = []
-        for si, p in enumerate(procs):
-            if p is not None:
-                tasks.append(asyncio.ensure_future(_read_one(si, p)))
-        if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
-
-    pty_read_task: asyncio.Task | None = None
-
-    async def _pty_reader() -> None:
+    def _pty_reader_thread() -> None:
         while True:
-            await _read_ptys()
-            await asyncio.sleep(0.015)
+            for si, p in enumerate(procs):
+                if p is None:
+                    continue
+                try:
+                    chunk = p.read(65536)
+                    if chunk:
+                        pty_queue.put((si, chunk))
+                except (EOFError, OSError):
+                    procs[si] = None
+                except Exception:
+                    pass
+            import time
+            time.sleep(0.01)
 
-    pty_read_task = asyncio.ensure_future(_pty_reader())
+    _threading.Thread(target=_pty_reader_thread, name="plmux-daemon-pty-reader", daemon=True).start()
+
+    async def _drain_pty_queue() -> None:
+        while True:
+            try:
+                si, chunk = pty_queue.get_nowait()
+                await _send_frame(si, 0x81, chunk)
+            except queue.Empty:
+                break
 
     try:
         while True:
+            await _drain_pty_queue()
+
             try:
-                header = await asyncio.wait_for(_read_exact(9), timeout=0.1)
+                header = await asyncio.wait_for(_read_exact(9), timeout=0.05)
             except asyncio.TimeoutError:
                 continue
 
@@ -178,12 +176,7 @@ async def _proxy_pty_loop(
                     pass
                 await _send_frame(session_id, 0x82, b"\x01" if alive else b"\x00")
     finally:
-        if pty_read_task is not None:
-            pty_read_task.cancel()
-            try:
-                await pty_read_task
-            except (asyncio.CancelledError, Exception):
-                pass
+        pass
 
 
 async def run_server(state: ServerState) -> None:

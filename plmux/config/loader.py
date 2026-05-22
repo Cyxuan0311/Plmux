@@ -7,7 +7,7 @@ import os
 import sys
 from copy import deepcopy
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 from plmux.config.schema import (
     ExtensionsConfig,
@@ -51,9 +51,19 @@ def _parse_ui(d: Dict[str, Any]) -> UIConfig:
 
 
 def _parse_keys(d: Dict[str, Any]) -> KeysConfig:
+    default_cfg = KeysConfig()
+    default_bindings = dict(default_cfg.bindings)
+    raw_bindings = dict(d.get("bindings", {}))
+    merged_bindings: Dict[str, List[str]] = {}
+    for action, keys in default_bindings.items():
+        merged_bindings[action] = list(raw_bindings.pop(action, keys))
+    for action, keys in raw_bindings.items():
+        if isinstance(keys, list):
+            merged_bindings[action] = [str(k) for k in keys]
     return KeysConfig(
         prefix=str(d.get("prefix", "ctrl+b")),
         command_line=str(d.get("command_line", ":")),
+        bindings=merged_bindings,
     )
 
 
@@ -131,6 +141,7 @@ def save_user_config(cfg: PlmuxConfig, explicit_path: str | None = None) -> None
         "keys": {
             "prefix": cfg.keys.prefix,
             "command_line": cfg.keys.command_line,
+            "bindings": cfg.keys.bindings,
         },
         "session": {
             "auto_save": cfg.session.auto_save,
