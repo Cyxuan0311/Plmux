@@ -59,17 +59,20 @@ export function updateStatus(m, state) {
   document.getElementById("sb-clock").innerHTML = '<span class="icon">\u{1F552}</span> ' + (m.clock || "--:--:--");
   document.getElementById("sb-host").innerHTML = '<span class="icon">\u2318</span> ' + (m.host || "plmux");
 
-  var batEl = document.getElementById("sb-bat");
-  var batArrow = document.getElementById("arr-bat");
-  if (m.bat) {
-    batEl.innerHTML = '<span class="icon">\u{1F50B}</span> ' + m.bat;
-    batEl.className = "sb-seg bat-" + (m.bat_style || "ok");
-    batEl.style.display = "";
-    batArrow.style.display = "";
-    batArrow.style.borderLeftColor = "var(--bat-" + (m.bat_style || "ok") + "-bg)";
+  var rightContainer = document.getElementById("sb-right-items");
+  var rightItems = m.right_items || [];
+  if (rightItems.length > 0) {
+    var html = "";
+    for (var i = rightItems.length - 1; i >= 0; i--) {
+      var item = rightItems[i];
+      var styleClass = "right-" + (item.style || "ok");
+      var bgVar = "var(--bat-" + (item.style || "ok") + "-bg)";
+      html += '<span class="sb-seg ' + styleClass + '">' + item.text + '</span>';
+      html += '<span class="sb-arrow-r" style="border-left-color:' + bgVar + '"></span>';
+    }
+    rightContainer.innerHTML = html;
   } else {
-    batEl.style.display = "none";
-    batArrow.style.display = "none";
+    rightContainer.innerHTML = "";
   }
 
   if (m.cmdline_active) {

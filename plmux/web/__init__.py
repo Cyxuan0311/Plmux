@@ -18,15 +18,15 @@ _WS_MAGIC = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 
 try:
     from plmux.web._c_extension import (
-        FrameParser,
-        encode_text_frame,
-        encode_binary_frame,
-        encode_close_frame,
-        encode_pong_frame,
-        OPCODE_TEXT,
-        OPCODE_BINARY,
-        OPCODE_CLOSE,
-        OPCODE_PING,
+        FrameParser as FrameParser,
+        encode_text_frame as encode_text_frame,
+        encode_binary_frame as encode_binary_frame,
+        encode_close_frame as encode_close_frame,
+        encode_pong_frame as encode_pong_frame,
+        OPCODE_TEXT as OPCODE_TEXT,
+        OPCODE_BINARY as OPCODE_BINARY,
+        OPCODE_CLOSE as OPCODE_CLOSE,
+        OPCODE_PING as OPCODE_PING,
     )
     _HAS_C_KERNEL = FrameParser is not None
 except ImportError:
@@ -453,7 +453,7 @@ def _web_key_to_terminal(msg: dict) -> str:
     code = msg.get("code", "")
     ctrl = msg.get("ctrl", False)
     alt = msg.get("alt", False)
-    shift = msg.get("shift", False)
+    msg.get("shift", False)
 
     raw = msg.get("raw", "")
     if raw:

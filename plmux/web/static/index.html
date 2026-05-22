@@ -90,6 +90,9 @@ body { display:flex; flex-direction:column; font-family:'Cascadia Code','Fira Co
 .sb-seg.bat-ok { background:var(--bat-ok-bg); color:#000; }
 .sb-seg.bat-mid { background:var(--bat-mid-bg); color:#000; }
 .sb-seg.bat-low { background:var(--bat-low-bg); color:#fff; }
+.sb-seg.right-ok { background:var(--bat-ok-bg); color:#000; }
+.sb-seg.right-mid { background:var(--bat-mid-bg); color:#000; }
+.sb-seg.right-low { background:var(--bat-low-bg); color:#fff; }
 .sb-seg.clock { background:var(--clock-bg); color:var(--clock-fg); }
 .sb-seg.host { background:var(--host-bg); color:var(--host-fg); }
 
@@ -263,8 +266,7 @@ body { display:flex; flex-direction:column; font-family:'Cascadia Code','Fira Co
     <span class="sb-seg cmd" id="sb-cmd" style="display:none"></span>
   </div>
   <div class="right">
-    <span class="sb-seg bat-ok" id="sb-bat" style="display:none"></span>
-    <span class="sb-arrow-r" id="arr-bat" style="display:none"></span>
+    <span id="sb-right-items"></span>
     <span class="sb-arrow-r" id="arr-clock-r" style="border-left-color:var(--clock-bg)"></span>
     <span class="sb-seg clock" id="sb-clock"><span class="icon">&#x1F552;</span> --:--:--</span>
     <span class="sb-arrow-r" id="arr-host-r" style="border-left-color:var(--host-bg)"></span>

@@ -3,10 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-import json
-import os
 import queue
-import sys
 from typing import Any, Optional
 
 from plmux.web import WebClientServer
@@ -173,7 +170,6 @@ def _parse_web_key(data: str) -> Any:
 
 
 def drain_web_keys() -> list[Any]:
-    from blessed.keyboard import Keystroke
 
     keys: list[Any] = []
     while True:
@@ -193,15 +189,13 @@ def _serialize_tree(tree: Any) -> Any:
 
 
 def _build_layout_msg(ws: Any) -> dict[str, Any]:
-    from plmux.ui.geometry import assign_rects, pane_indices
+    from plmux.ui.geometry import pane_indices
 
     tree = ws.tree
     indices = pane_indices(tree)
-    rects = assign_rects(tree, 0, 0, 100, 100)
 
     panes = []
     for idx in indices:
-        r = rects.get(idx)
         panes.append({
             "idx": idx,
             "focused": idx == ws.focus_pane,
@@ -244,6 +238,7 @@ def _build_overlay_msg(ws: Any, ctx: Any) -> dict[str, Any] | None:
             cursor=getattr(ctx, "theme_list_cursor", 0),
             terminal_width=80,
             terminal_height=24,
+            search_query=getattr(ctx, "theme_search_query", ""),
         )
         s = io.StringIO()
         Console(file=s, force_terminal=True, width=80).print(panel)
@@ -369,7 +364,6 @@ async def _broadcast_loop(server: WebClientServer, ws: Any) -> None:
         try:
             if server._clients and ws.sessions:
                 from plmux.extensions.registry import get_plugin_status_items
-                from plmux.ui.geometry import pane_indices
                 from datetime import datetime
 
                 for i, s in enumerate(ws.sessions):
@@ -417,15 +411,16 @@ async def _broadcast_loop(server: WebClientServer, ws: Any) -> None:
                     _last_mode = current_mode
 
                 items = get_plugin_status_items()
-                bat_text = ""
-                bat_style = "ok"
-                for label, _style in items:
-                    if label.startswith("bat:"):
-                        bat_text = label[4:]
+                right_items = []
+                for label, _style, pos in items:
+                    if pos == "right":
+                        display = label.split(":", 1)[1] if ":" in label else label
+                        style_key = "ok"
                         if "low" in _style.lower() or "#f92672" in _style:
-                            bat_style = "low"
+                            style_key = "low"
                         elif "mid" in _style.lower() or "#fabd2f" in _style:
-                            bat_style = "mid"
+                            style_key = "mid"
+                        right_items.append({"text": display, "style": style_key})
 
                 current_cmd = ""
                 if ws.focus_pane < len(ws.sessions):
@@ -438,8 +433,7 @@ async def _broadcast_loop(server: WebClientServer, ws: Any) -> None:
                     "cmd": current_cmd,
                     "clock": datetime.now().strftime("%H:%M:%S"),
                     "host": "plmux",
-                    "bat": bat_text,
-                    "bat_style": bat_style,
+                    "right_items": right_items,
                     "cmdline_active": getattr(ws, "web_mode", "normal") == "cmdline",
                     "cmdline_buffer": getattr(ws, "web_cmd_buffer", ""),
                 }
