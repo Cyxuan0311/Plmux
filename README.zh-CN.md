@@ -1,15 +1,25 @@
 <div align="center">
-  <img src="resource/logo.png" alt="plmux logo" width="120" />
+  <img 
+    src="resource/logo.png" 
+    alt="plmux logo" 
+    width="120" 
+    style="border-radius: 16px; overflow: hidden;"
+  />
 
 # plmux ： Python Lightweight Terminal Multiplexer
 
+[English](README.md) | 中文
+
+[![Version](https://img.shields.io/badge/version-0.1.0-blueviolet.svg)](https://github.com/Frames/plmux/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
+[![Python 3.10+](https://img.shields.io/badge/Python-3.10+-3776AB.svg?logo=python&logoColor=white)](https://www.python.org/downloads/)
+[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-0078D4.svg)](https://github.com/Frames/plmux)
+
 </div>
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)](https://github.com/Frames/plmux)
 
-一个轻量级的跨平台终端复用工具，灵感来源于 tmux，基于 Python、Rich 和 C 扩展构建。提供窗格分割、窗口管理、复制模式、Vim 风格命令接口、动态状态栏（实时显示前台进程）、23 款内置主题、会话持久化、浏览器 Web 客户端，以及类 tmux 的插件扩展系统。
+
+一个轻量级的跨平台终端复用工具，灵感来源于 tmux，基于 Python、Rich 和 C 扩展构建。提供窗格分割、窗口管理、复制模式、Vim 风格命令接口、动态状态栏（实时显示前台进程）、36 款内置主题、会话持久化、浏览器 Web 客户端，类 tmux 的插件扩展系统，以及配置热更新支持。
 
 <div align="center">
   <img src="resource/demo.png" alt="plmux demo" />
@@ -25,7 +35,8 @@
 - **复制模式**: 文本选择和剪贴板集成
 - **命令行**: Vim 风格的 `:` 命令接口，支持 Tab 补全
 - **动态状态栏**: 实时显示模式、窗口、窗格、前台命令（nano、btop、fzf 等）、时钟和主机名
-- **主题**: 23 款内置主题（dracula、gruvbox、tokyonight、catppuccin、nord 等）+ 用户自定义 JSON 主题
+- **主题**: 36 款内置主题（dracula、gruvbox、tokyonight、catppuccin、nord、edge、doom-one、challenger-deep、moonlight、forest-night、snazzy 等）+ 用户自定义 JSON 主题
+- **热更新**: 配置和插件变更自动检测并应用，无需重启
 - **Web 客户端**: 通过 WebSocket 在浏览器中访问终端，C 扩展加速帧处理
 - **插件系统**: 类 tmux 的扩展钩子、自定义命令、键绑定和状态栏项
 - **C 扩展**: FastScreen（ANSI 解析/渲染）和 WebSocket 内核，用于高性能帧处理
@@ -63,7 +74,7 @@ plmux kill-server      # 终止守护进程
 
 ### 前缀键
 
-所有快捷键均以 **Ctrl+B** 为前缀（可配置）。
+所有快捷键均以 **Ctrl+B** 为前缀（可配置）。详见[快捷键](docs/keybindings.zh-CN.md)完整文档。
 
 | 行为 | 绑定 |
 |------|------|
@@ -108,9 +119,23 @@ plmux kill-server      # 终止守护进程
 | `:webstop` | 停止 Web 客户端服务器 |
 | `:ls` | 打开会话浏览器 |
 | `:plugins` | 打开插件管理器 |
+| `:reload`, `:source` | 重新加载配置并加载新启用的插件 |
 | `:help` | 显示帮助覆盖层 |
 
 使用 `Tab` 进行命令补全。
+
+## 热更新
+
+plmux 自动监视配置文件的变化。当你编辑 `config.json` 时，更改会立即生效：
+
+- **主题更改**立即生效
+- **快捷键更改**在下次按键时生效
+- **新启用的插件**自动加载
+- **UI 设置**在下一帧生效
+
+你也可以使用 `:reload` 或 `:source` 命令手动触发重载。
+
+详见[配置 - 热更新](docs/configuration.zh-CN.md#热更新)了解哪些设置可以和不可以热更新。
 
 ## Web 客户端 (计划中)
 
@@ -126,15 +151,15 @@ plmux 内置 Web 服务器，支持通过浏览器访问终端。详见 [Web 客
 
 ## 配置
 
-详见 [配置](docs/configuration.zh-CN.md) 完整文档。
+详见[配置](docs/configuration.zh-CN.md)完整文档。快捷键自定义详见[快捷键](docs/keybindings.zh-CN.md)。
 
 ## 主题
 
-详见 [主题](docs/themes.zh-CN.md) 完整文档。
+详见[主题](docs/themes.zh-CN.md)完整文档。
 
 ## 插件
 
-详见 [插件](docs/plugins.zh-CN.md) 完整文档。
+详见[插件](docs/plugins.zh-CN.md)完整文档。
 
 ## 架构
 

@@ -160,14 +160,21 @@ def toggle_feature(ws) -> None:
 register_key_binding("ctrl+g", toggle_feature)
 ```
 
-### register_status_item(name, style)
+### register_status_item(name, style, position="left")
 
-Add a custom item to the status bar.
+Add a custom item to the status bar. The `position` parameter controls where the item appears:
+
+- `"left"` (default) — displayed on the left side of the status bar, after the mode/window/pane segments
+- `"right"` — displayed on the right side of the status bar, before the clock segment, with Powerline arrow separators
+
+Items with the same prefix (the part before `:`) replace each other automatically.
 
 ```python
 from plmux.extensions import register_status_item
 
 register_status_item("git-branch", "bold magenta on default")
+register_status_item("bat:85%", "bold #85c751 on #75715e", position="right")
+register_status_item("cpu:12%", "bold #85c751 on #75715e", position="right")
 ```
 
 ### register_hook(name, fn)

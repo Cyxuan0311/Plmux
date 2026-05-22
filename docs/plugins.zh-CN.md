@@ -160,14 +160,21 @@ def toggle_feature(ws) -> None:
 register_key_binding("ctrl+g", toggle_feature)
 ```
 
-### register_status_item(name, style)
+### register_status_item(name, style, position="left")
 
-向状态栏添加自定义项。
+向状态栏添加自定义项。`position` 参数控制项的显示位置：
+
+- `"left"`（默认）— 显示在状态栏左侧，位于模式/窗口/窗格段之后
+- `"right"` — 显示在状态栏右侧，位于时钟段之前，带有 Powerline 箭头分隔符
+
+具有相同前缀（`:` 之前的部分）的项会自动替换。
 
 ```python
 from plmux.extensions import register_status_item
 
 register_status_item("git-branch", "bold magenta on default")
+register_status_item("bat:85%", "bold #85c751 on #75715e", position="right")
+register_status_item("cpu:12%", "bold #85c751 on #75715e", position="right")
 ```
 
 ### register_hook(name, fn)

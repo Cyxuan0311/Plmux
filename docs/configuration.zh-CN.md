@@ -30,7 +30,29 @@
   },
   "keys": {
     "prefix": "ctrl+b",
-    "command_line": ":"
+    "command_line": ":",
+    "bindings": {
+      "split-vertical": ["%", "v"],
+      "split-horizontal": ["\"", "s"],
+      "only-pane": ["o"],
+      "next-window": ["n"],
+      "prev-window": ["p"],
+      "new-window": ["c"],
+      "close-window": ["&"],
+      "copy-mode": ["["],
+      "cycle-layout": [" "],
+      "help": ["?"],
+      "detach": ["d"],
+      "focus-left": ["h"],
+      "focus-right": ["l"],
+      "focus-up": ["k"],
+      "focus-down": ["j"],
+      "resize-left": ["H"],
+      "resize-right": ["L"],
+      "resize-up": ["K"],
+      "resize-down": ["J"],
+      "zoom": ["z"]
+    }
   },
   "session": {
     "auto_save": true,
@@ -79,6 +101,36 @@
 |------|------|--------|------|
 | `prefix` | `string` | `"ctrl+b"` | 所有快捷键的前缀键 |
 | `command_line` | `string` | `":"` | 触发命令行模式的字符 |
+| `bindings` | `dict[str, list[str]]` | （见默认值） | 操作到按键的映射；详见[快捷键](keybindings.zh-CN.md) |
+
+#### `keys.bindings` — 操作按键映射
+
+`bindings` 中的每个键将操作名称映射到按键字符串列表。第一个匹配的按键触发操作。可以为同一操作添加多个按键，也可以通过从列表中移除按键来删除绑定。
+
+| 操作 | 默认按键 | 说明 |
+|------|----------|------|
+| `split-vertical` | `["%", "v"]` | 左右分割窗格 |
+| `split-horizontal` | `["\"", "s"]` | 上下分割窗格 |
+| `only-pane` | `["o"]` | 仅保留当前窗格 |
+| `next-window` | `["n"]` | 切换到下一个窗口 |
+| `prev-window` | `["p"]` | 切换到上一个窗口 |
+| `new-window` | `["c"]` | 创建新窗口 |
+| `close-window` | `["&"]` | 关闭当前窗口 |
+| `copy-mode` | `["["]` | 进入复制模式 |
+| `cycle-layout` | `[" "]` | 循环布局模板 |
+| `help` | `["?"]` | 显示帮助覆盖层 |
+| `detach` | `["d"]` | 分离会话 |
+| `focus-left` | `["h"]` | 焦点移至上一个窗格 |
+| `focus-right` | `["l"]` | 焦点移至下一个窗格 |
+| `focus-up` | `["k"]` | 焦点移至上一个窗格 |
+| `focus-down` | `["j"]` | 焦点移至下一个窗格 |
+| `resize-left` | `["H"]` | 向左调整窗格大小 |
+| `resize-right` | `["L"]` | 向右调整窗格大小 |
+| `resize-up` | `["K"]` | 向上调整窗格大小 |
+| `resize-down` | `["J"]` | 向下调整窗格大小 |
+| `zoom` | `["z"]` | 切换窗格缩放 |
+
+完整的快捷键参考（包括复制模式、命令模式和覆盖层模式），请参见[快捷键](keybindings.zh-CN.md)。
 
 ### `session` — 会话持久化选项
 
@@ -93,6 +145,48 @@
 |------|------|--------|------|
 | `enabled` | `list[str]` | `[]` | 要加载的扩展名称列表 |
 | `search_paths` | `list[str]` | `["~/.config/plmux/extensions"]` | 搜索扩展的目录列表 |
+
+## 热更新
+
+plmux 支持无需重启即可热更新配置：
+
+### 自动文件监听
+
+plmux 监视用户配置文件的变化。当文件在磁盘上被修改时，配置会自动重新加载：
+
+- **主题更改**立即生效
+- **快捷键更改**在下次按键时生效
+- **新启用的插件**自动加载
+- **UI 设置**（刷新率、状态栏位置等）在下一帧生效
+
+### 手动重载
+
+使用 `:reload` 或 `:source` 命令手动触发配置重载：
+
+```
+:reload
+:source
+```
+
+当文件监听器遗漏了变更时（例如在网络文件系统上），这很有用。
+
+### 可热更新的设置
+
+| 设置 | 可热更新 | 说明 |
+|------|----------|------|
+| `theme` | 是 | 立即生效 |
+| `keys.prefix` | 是 | 下次按前缀键时生效 |
+| `keys.command_line` | 是 | 下次进入命令模式时生效 |
+| `keys.bindings` | 是 | 下次按键时生效 |
+| `ui.refresh_hz` | 是 | 下一帧生效 |
+| `ui.status_position` | 是 | 下一帧生效 |
+| `ui.*`（其他） | 是 | 下一帧生效 |
+| `extensions.enabled` | 部分 | 新插件会加载；已移除的插件在重启前仍保持加载 |
+| `shell` | 否 | 仅影响新窗格/窗口 |
+| `env` | 否 | 仅影响新窗格/窗口 |
+| `session.*` | 否 | 会话设置需要重启 |
+
+实现：[event_loop.py](../plmux/app/event_loop.py)（`_ConfigWatcher`）| [cmdline.py](../plmux/modes/cmdline.py)（`_do_reload_config`）
 
 ## 加载流程
 
