@@ -20,6 +20,15 @@ _SEQUENCE_MAP: dict[str, str] = {
     "KEY_TAB": "\t",
 }
 
+_APP_CURSOR_MAP: dict[str, str] = {
+    "KEY_UP": "\x1bOA",
+    "KEY_DOWN": "\x1bOB",
+    "KEY_RIGHT": "\x1bOC",
+    "KEY_LEFT": "\x1bOD",
+    "KEY_HOME": "\x1bOH",
+    "KEY_END": "\x1bOF",
+}
+
 _FUNCTION_KEY_MAP: dict[str, str] = {
     "KEY_F1": "\x1bOP",
     "KEY_F2": "\x1bOQ",
@@ -55,14 +64,22 @@ def _is_windows() -> bool:
     return sys.platform == "win32" or os.name == "nt"
 
 
+def _cursor_key_sequence(name: str, session: Any) -> str | None:
+    app_cursor = getattr(session, "_app_cursor_keys", False)
+    if app_cursor and name in _APP_CURSOR_MAP:
+        return _APP_CURSOR_MAP[name]
+    return _SEQUENCE_MAP.get(name)
+
+
 def send_keystroke_to_session(session: Any, key: Any) -> None:
     if type(key) is str:
         session.write_text(key)
         return
     if key.is_sequence:
         name = key.name or ""
-        if name in _SEQUENCE_MAP:
-            session.write_text(_SEQUENCE_MAP[name])
+        seq = _cursor_key_sequence(name, session)
+        if seq is not None:
+            session.write_text(seq)
         elif name in _FUNCTION_KEY_MAP:
             session.write_text(_FUNCTION_KEY_MAP[name])
         elif name == "KEY_ENTER":

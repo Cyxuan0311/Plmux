@@ -16,8 +16,9 @@ def build_help_overlay(
     active_tab: int,
     terminal_width: int,
     terminal_height: int,
+    bindings: dict[str, list[str]] | None = None,
 ) -> Panel:
-    shortcuts_tab = _build_shortcuts_table(theme)
+    shortcuts_tab = _build_shortcuts_table(theme, bindings=bindings)
     commands_tab = _build_commands_table(theme)
     copy_tab = _build_copy_mode_table(theme)
 
@@ -67,27 +68,36 @@ def build_help_overlay(
     )
 
 
-def _build_shortcuts_table(theme: Theme) -> Table:
+def _build_shortcuts_table(theme: Theme, *, bindings: dict[str, list[str]] | None = None) -> Table:
     t = Table(show_header=True, box=box.SIMPLE, border_style="dim #665c54")
     t.add_column("Key", style="bold #fabd2f", width=18)
     t.add_column("Action", style="#ebdbb2")
 
+    b = bindings or {}
+
+    def _keys(action: str) -> str:
+        keys = b.get(action, [])
+        if not keys:
+            return ""
+        return " / ".join(f"^B {k}" if len(k) == 1 and k != " " else f"^B <{k}>" for k in keys)
+
     rows = [
-        ("^B %  /  ^B v", "Split vertically (side-by-side)"),
-        ('^B "  /  ^B s', "Split horizontally (stacked)"),
-        ("^B h/j/k/l", "Focus left/down/up/right pane"),
-        ("^B H / L", "Resize pane narrower / wider"),
-        ("^B K / J", "Resize pane shorter / taller"),
-        ("^B z", "Zoom (toggle) current pane to fullscreen"),
-        ("^B n / p", "Next / previous window"),
-        ("^B c", "New window"),
-        ("^B &", "Close current window"),
+        (_keys("split-vertical"), "Split vertically (side-by-side)"),
+        (_keys("split-horizontal"), "Split horizontally (stacked)"),
+        (_keys("focus-left") + " / " + _keys("focus-right"), "Focus left/right pane"),
+        (_keys("focus-up") + " / " + _keys("focus-down"), "Focus up/down pane"),
+        (_keys("resize-left") + " / " + _keys("resize-right"), "Resize pane narrower / wider"),
+        (_keys("resize-up") + " / " + _keys("resize-down"), "Resize pane shorter / taller"),
+        (_keys("zoom"), "Zoom (toggle) current pane to fullscreen"),
+        (_keys("next-window") + " / " + _keys("prev-window"), "Next / previous window"),
+        (_keys("new-window"), "New window"),
+        (_keys("close-window"), "Close current window"),
         ("^B 0-9", "Jump to window N"),
-        ("^B Space", "Cycle layout (even/main-v/main-h)"),
-        ("^B o", "Keep only this pane (close others)"),
-        ("^B [", "Enter copy mode"),
-        ("^B ?", "Open this help panel"),
-        ("^B d", "Detach session (keep running in background)"),
+        (_keys("cycle-layout"), "Cycle layout (even/main-v/main-h)"),
+        (_keys("only-pane"), "Keep only this pane (close others)"),
+        (_keys("copy-mode"), "Enter copy mode"),
+        (_keys("help"), "Open this help panel"),
+        (_keys("detach"), "Detach session (keep running in background)"),
         ("Esc + :", "Enter command mode"),
         ("^Q", "Force quit plmux"),
     ]

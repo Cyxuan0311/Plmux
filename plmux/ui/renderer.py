@@ -18,6 +18,7 @@ from plmux.ui.theme_list_overlay import build_theme_list_overlay
 from plmux.ui.session_list_overlay import build_session_list_overlay
 from plmux.ui.plugin_list_overlay import build_plugin_list_overlay
 from plmux.ui.layout_list_overlay import build_layout_list_overlay
+from plmux.extensions.registry import get_plugin_overlay
 from plmux.workspace import PaneWorkspace
 
 
@@ -96,7 +97,7 @@ def build_status_line(
     *,
     clock_str: str = "",
     mode: str = "NORMAL",
-    extra_items: list[tuple[str, str]] | None = None,
+    extra_items: list[tuple[str, str, str]] | None = None,
 ) -> Text:
     now = clock_str or datetime.now().strftime("%H:%M:%S")
 
@@ -140,20 +141,20 @@ def build_status_line(
         left.append("\uE0B0", style=f"{pane_bg} on default")
 
     if extra_items:
-        for label, style_name in extra_items:
-            if label.startswith("bat:"):
+        for label, style_name, pos in extra_items:
+            if pos == "right":
                 continue
             left.append(f" {label} ", style=style_name)
             left.append("\uE0B0", style=f"{cmd_bg if current_cmd else pane_bg} on default")
 
     right = Text()
     if extra_items:
-        for label, style_name in reversed(extra_items):
-            if label.startswith("bat:"):
-                bat_bg = _extract_bg(style_name)
-                right.append(f" {label[4:]} ", style=style_name)
-                right.append("\uE0B2", style=f"{bat_bg} on default")
-                break
+        right_items = [(label, style_name) for label, style_name, pos in extra_items if pos == "right"]
+        for label, style_name in reversed(right_items):
+            display = label.split(":", 1)[1] if ":" in label else label
+            item_bg = _extract_bg(style_name)
+            right.append(f" {display} ", style=style_name)
+            right.append("\uE0B2", style=f"{item_bg} on default")
 
     right.append("\uE0B2", style=f"{clock_bg} on default")
     right.append(f" {now} ", style=clock_style)
@@ -223,6 +224,7 @@ def build_root(
     help_tab: int = 0,
     theme_list_active: bool = False,
     theme_list_cursor: int = 0,
+    theme_search_query: str = "",
     session_list_active: bool = False,
     session_list_cursor: int = 0,
     plugin_list_active: bool = False,
@@ -236,6 +238,8 @@ def build_root(
     clock_str: str = "",
     mode: str = "NORMAL",
     completion_hints: str = "",
+    plugin_overlay_name: str = "",
+    plugin_state: dict | None = None,
 ) -> Layout:
     theme = ws.theme
     # support additional status indicators
@@ -274,6 +278,7 @@ def build_root(
             active_tab=help_tab,
             terminal_width=terminal_width,
             terminal_height=terminal_height,
+            bindings=ws.cfg.keys.bindings,
         )
         centered_help = Align.center(help_panel, vertical="middle")
 
@@ -295,6 +300,7 @@ def build_root(
             cursor=theme_list_cursor,
             terminal_width=terminal_width,
             terminal_height=terminal_height,
+            search_query=theme_search_query,
         )
         centered_theme = Align.center(theme_panel, vertical="middle")
 
@@ -377,6 +383,48 @@ def build_root(
                 Layout(status_text, name="status", size=1),
                 Layout(cmd, name="cmd", size=1),
             )
+    elif plugin_overlay_name:
+        overlay_fn = get_plugin_overlay(plugin_overlay_name)
+        if overlay_fn is not None:
+            try:
+                plugin_panel = overlay_fn(
+                    theme,
+                    terminal_width=terminal_width,
+                    terminal_height=terminal_height,
+                    plugin_state=plugin_state or {},
+                )
+            except Exception:
+                plugin_panel = Panel(
+                    f"Plugin overlay error: {plugin_overlay_name}",
+                    border_style="red",
+                )
+            centered_plugin = Align.center(plugin_panel, vertical="middle")
+
+            if status_position == "top":
+                root.split_column(
+                    Layout(status_text, name="status", size=1),
+                    Layout(centered_plugin, name="main"),
+                    Layout(cmd, name="cmd", size=1),
+                )
+            else:
+                root.split_column(
+                    Layout(centered_plugin, name="main"),
+                    Layout(status_text, name="status", size=1),
+                    Layout(cmd, name="cmd", size=1),
+                )
+        else:
+            if status_position == "top":
+                root.split_column(
+                    Layout(status_text, name="status", size=1),
+                    Layout(main, name="main"),
+                    Layout(cmd, name="cmd", size=1),
+                )
+            else:
+                root.split_column(
+                    Layout(main, name="main"),
+                    Layout(status_text, name="status", size=1),
+                    Layout(cmd, name="cmd", size=1),
+                )
     elif status_position == "top":
         root.split_column(
             Layout(status_text, name="status", size=1),

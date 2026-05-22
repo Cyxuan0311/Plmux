@@ -28,6 +28,8 @@ class CommandResult:
     start_web_server: bool = False
     web_port: int = 9888
     stop_web_server: bool = False
+    reload_config: bool = False
+    plugin_overlay: Optional[str] = None
 
 
 def _cmd_exit(ws: PaneWorkspace, args: List[str]) -> CommandResult:
@@ -113,6 +115,10 @@ def _cmd_webstop(ws: PaneWorkspace, args: List[str]) -> CommandResult:
     return CommandResult(stop_web_server=True)
 
 
+def _cmd_reload(ws: PaneWorkspace, args: List[str]) -> CommandResult:
+    return CommandResult(reload_config=True)
+
+
 _ALIASES = {
     "sp": "split",
     "vsp": "vsplit",
@@ -137,6 +143,8 @@ _COMMANDS: Dict[str, Callable] = {
     "layout": _cmd_layout,
     "web": _cmd_web,
     "webstop": _cmd_webstop,
+    "reload": _cmd_reload,
+    "source": _cmd_reload,
 }
 
 
