@@ -8,12 +8,9 @@ import os
 import sys
 
 from plmux import __version__
-from plmux.config.loader import load_config
-from plmux.config.schema import PlmuxConfig
 from plmux.cli.commands import cmd_list_sessions, cmd_list_windows, cmd_kill_server
-from plmux.daemon import is_server_alive, run_server, is_windows
+from plmux.daemon import is_server_alive, run_server, is_windows, kill_server
 from plmux.state_bridge import serve_mode, spawn_server_subprocess
-from plmux.ui.theme import load_theme, Theme
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -101,6 +98,11 @@ def run(argv: list[str] | None = None) -> None:
                     os._exit(0)
             elif is_windows():
                 spawn_server_subprocess(detach_state)
+                import time as _time
+                for _ in range(50):
+                    if is_server_alive():
+                        break
+                    _time.sleep(0.1)
             else:
                 asyncio.run(run_server(detach_state))
         elif attach_mode:
