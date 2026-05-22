@@ -49,7 +49,7 @@ jobs:
           pip install pytest pytest-cov pytest-html pyperclip
       - name: Run tests with coverage
         run: |
-          pytest --cache-clear --tb=short --cov=plmux --cov-report=xml:coverage.xml --cov-report=term-missing --html=report.html --self-contained-html -q
+          pytest -p no:cacheprovider --tb=short --cov=plmux --cov-report=xml:coverage.xml --cov-report=term-missing --html=report.html --self-contained-html -q
       - name: Test pass rate summary
         if: always()
         run: |
