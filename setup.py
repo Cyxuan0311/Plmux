@@ -6,6 +6,10 @@ if sys.platform == 'win32':
     compile_args = ['/O2', '/GL']
     link_args = ['/LTCG']
     library_dirs = [os.path.join(sys.base_prefix, 'libs')]
+elif sys.platform == 'darwin':
+    compile_args = ['-O3', '-flto']
+    link_args = ['-flto', '-lpthread']
+    library_dirs = []
 else:
     compile_args = ['-O3', '-march=native', '-flto']
     link_args = ['-flto', '-lpthread']
