@@ -5,6 +5,7 @@ __pycache__/
 build/
 plmux_debug/
 plmux_debug.log
+plmux_cdebug.log
 plmux.egg-info/
 .benchmark/
 .pytest_cache/
