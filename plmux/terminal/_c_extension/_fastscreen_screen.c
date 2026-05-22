@@ -48,6 +48,10 @@ screen_scroll_up(FastScreen *s, int n) {
     if (n > region_h) n = region_h;
     if (n <= 0) return;
 
+    if (top == 0 && !s->use_alt_screen) {
+        s->scroll_count += n;
+    }
+
     FastCell *base = s->use_alt_screen ? s->alt_cells : s->cells;
     int stride = s->cols;
     for (int y = top; y <= bot - n; y++) {

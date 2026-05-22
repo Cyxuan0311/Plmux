@@ -26,7 +26,7 @@ from plmux.platform.pty_factory import spawn_pty
 from plmux.platform.pty_handle import PtyHandle
 from plmux.platform.shell import resolve_shell_argv
 from plmux.terminal.pyte_render import _cursor_overlay_style, _safe_glyph
-from plmux.debug_log import PerfStats, PerfTimer, perf_dbg
+from plmux.debug_log import PerfStats, PerfTimer
 
 _OSC_RE = re.compile(r"\x1b\][^\x07]*\x07")
 
@@ -77,6 +77,8 @@ class TerminalContent:
 class TerminalSession:
     """One shell in a PTY, parsed into a pyte Screen."""
 
+    DEFAULT_SCROLLBACK = 10000
+
     def __init__(
         self,
         rows: int,
@@ -84,12 +86,15 @@ class TerminalSession:
         shell: Optional[list[str]] = None,
         env: Optional[dict] = None,
         on_update: Optional[Callable[[], None]] = None,
+        scrollback_lines: int = DEFAULT_SCROLLBACK,
     ) -> None:
         self.rows = max(1, rows)
         self.cols = max(1, cols)
         self._argv = resolve_shell_argv(shell)
         self._env_extra = dict(env or {})
         self._on_update = on_update
+        self._scrollback_max = max(0, scrollback_lines)
+        self._scrollback: list[str] = []
         self.screen = Screen(self.cols, self.rows)
         self.stream = ByteStream()
         self.stream.attach(self.screen)
@@ -111,6 +116,69 @@ class TerminalSession:
         self._line_cache: dict[int, list[tuple[str, str | None]]] = {}
         self._last_cursor_y: int = -1
         self._last_cursor_x: int = -1
+        self._scroll_offset: int = 0
+        self._copy_scroll_offset: int = 0
+        self._copy_cursor_pos: tuple[int, int] | None = None
+        self._copy_sel_start: tuple[int, int] | None = None
+        self._copy_sel_end: tuple[int, int] | None = None
+        self._copy_search_matches: list[tuple[int, int]] | None = None
+        self._copy_line_mode: bool = False
+
+    @property
+    def scroll_offset(self) -> int:
+        return self._scroll_offset
+
+    @scroll_offset.setter
+    def scroll_offset(self, value: int) -> None:
+        self._scroll_offset = max(0, value)
+
+    @property
+    def copy_scroll_offset(self) -> int:
+        return self._copy_scroll_offset
+
+    @copy_scroll_offset.setter
+    def copy_scroll_offset(self, value: int) -> None:
+        self._copy_scroll_offset = max(0, value)
+
+    @property
+    def copy_cursor_pos(self) -> tuple[int, int] | None:
+        return self._copy_cursor_pos
+
+    @copy_cursor_pos.setter
+    def copy_cursor_pos(self, value: tuple[int, int] | None) -> None:
+        self._copy_cursor_pos = value
+
+    @property
+    def copy_sel_start(self) -> tuple[int, int] | None:
+        return self._copy_sel_start
+
+    @copy_sel_start.setter
+    def copy_sel_start(self, value: tuple[int, int] | None) -> None:
+        self._copy_sel_start = value
+
+    @property
+    def copy_sel_end(self) -> tuple[int, int] | None:
+        return self._copy_sel_end
+
+    @copy_sel_end.setter
+    def copy_sel_end(self, value: tuple[int, int] | None) -> None:
+        self._copy_sel_end = value
+
+    @property
+    def copy_search_matches(self) -> list[tuple[int, int]] | None:
+        return self._copy_search_matches
+
+    @copy_search_matches.setter
+    def copy_search_matches(self, value: list[tuple[int, int]] | None) -> None:
+        self._copy_search_matches = value
+
+    @property
+    def copy_line_mode(self) -> bool:
+        return self._copy_line_mode
+
+    @copy_line_mode.setter
+    def copy_line_mode(self, value: bool) -> None:
+        self._copy_line_mode = value
 
     @classmethod
     def from_existing(
@@ -130,6 +198,8 @@ class TerminalSession:
         self._argv = list(argv)
         self._env_extra = {}
         self._on_update = on_update
+        self._scrollback_max = cls.DEFAULT_SCROLLBACK
+        self._scrollback: list[str] = []
         self.screen = Screen(self.cols, self.rows)
         self.stream = ByteStream()
         self.stream.attach(self.screen)
@@ -147,6 +217,13 @@ class TerminalSession:
         self._line_cache = {}
         self._last_cursor_y = -1
         self._last_cursor_x = -1
+        self._scroll_offset = 0
+        self._copy_scroll_offset = 0
+        self._copy_cursor_pos = None
+        self._copy_sel_start = None
+        self._copy_sel_end = None
+        self._copy_search_matches = None
+        self._copy_line_mode = False
         return self
 
     @property
@@ -290,18 +367,41 @@ class TerminalSession:
         if b"\x1b>" in data:
             self._app_cursor_keys = False
 
+    def _snapshot_screen_rows(self) -> list[str]:
+        rows = []
+        for y in range(self.rows):
+            rows.append(self.screen.render_row_to_ansi(y, draw_cursor=False))
+        return rows
+
+    def _capture_scrollback(self, snapshot: list[str] | None) -> None:
+        if self._scrollback_max <= 0:
+            return
+        if self.screen.use_alt_screen:
+            self.screen.reset_scroll_count()
+            return
+        n = self.screen.scroll_count
+        if n <= 0:
+            return
+        self.screen.reset_scroll_count()
+        if snapshot is None:
+            return
+        n = min(n, len(snapshot))
+        for i in range(n):
+            self._scrollback.append(snapshot[i])
+        if len(self._scrollback) > self._scrollback_max:
+            excess = len(self._scrollback) - self._scrollback_max
+            del self._scrollback[:excess]
+
     def feed(self, data: bytes) -> None:
         if not data:
             return
         self._detect_modes(data)
+        snapshot = self._snapshot_screen_rows() if self._scrollback_max > 0 else None
         t = PerfTimer()
         self.stream.feed(data)
         ms = t.elapsed_ms()
         _feed_stats.record(ms)
-        if ms > 5.0:
-            perf_dbg("session.feed SLOW len=%d ms=%.2f", len(data), ms)
-        if ms > 1.0:
-            perf_dbg("session.feed len=%d ms=%.2f", len(data), ms)
+        self._capture_scrollback(snapshot)
         if self._on_update:
             self._on_update()
 
@@ -311,7 +411,6 @@ class TerminalSession:
         fd = self.fileno()
         if sys.platform == "win32" or os.name == "nt":
             return
-        t = PerfTimer()
         total_bytes = 0
         rounds = 0
         max_rounds = 4
@@ -331,9 +430,6 @@ class TerminalSession:
             rounds += 1
             if not self._pty_nonblocking:
                 break
-        ms = t.elapsed_ms()
-        if total_bytes > 0:
-            perf_dbg("drain_nonblocking %d bytes %d rounds in %.2fms", total_bytes, rounds, ms)
 
     def _reader_loop(self) -> None:
         is_win = sys.platform == "win32" or os.name == "nt"
@@ -405,8 +501,6 @@ class TerminalSession:
                 s._pump_queue()
         ms = t.elapsed_ms()
         _select_stats.record(ms)
-        if ms > 1.0:
-            perf_dbg("select_and_feed SLOW ms=%.2f", ms)
 
     def _pump_queue(self) -> None:
         had_data = False
@@ -416,14 +510,16 @@ class TerminalSession:
             except queue.Empty:
                 break
             self._detect_modes(data)
+            snapshot = self._snapshot_screen_rows() if self._scrollback_max > 0 else None
             t_feed = PerfTimer()
             self.stream.feed(data)
             feed_ms = t_feed.elapsed_ms()
             _reader_feed_stats.record(feed_ms)
-            if feed_ms > 5.0:
-                perf_dbg("reader.feed SLOW len=%d ms=%.2f", len(data), feed_ms)
+            self._capture_scrollback(snapshot)
             had_data = True
         if had_data:
+            if self._scroll_offset > 0:
+                self._scroll_offset = 0
             self._on_update()
 
     def write_bytes(self, data: bytes) -> None:
@@ -520,7 +616,7 @@ class TerminalSession:
             at_caret = cursor_affects and x == cx
             selected = False
             if selection_affects:
-                if getattr(self, "_copy_line_mode", False):
+                if self._copy_line_mode:
                     selected = True
                 else:
                     if y1 == y2:
@@ -552,8 +648,6 @@ class TerminalSession:
 
         ms = t.elapsed_ms()
         _line_runs_stats.record(ms)
-        if ms > 2.0:
-            perf_dbg("_build_line_runs SLOW y=%d cols=%d ms=%.2f", y, self.cols, ms)
 
         return runs
 
@@ -580,7 +674,6 @@ class TerminalSession:
                 self._last_cursor_y = cy
                 self._last_cursor_x = cx
 
-            dirty_count = len(self.screen.dirty)
             for dirty_y in self.screen.dirty:
                 self._line_cache.pop(dirty_y, None)
 
@@ -617,11 +710,6 @@ class TerminalSession:
 
         ms = t.elapsed_ms()
         _render_stats.record(ms)
-        if ms > 5.0:
-            perf_dbg(
-                "build_render_text SLOW ms=%.2f rows=%d cols=%d dirty=%d",
-                ms, self.rows, self.cols, dirty_count,
-            )
         return TerminalContent(lines, self.cols, self.rows)
 
     def get_plain_text(self) -> str:
@@ -642,6 +730,114 @@ class TerminalSession:
                     row_chars.append(glyph)
                 lines.append("".join(row_chars).rstrip())
             return "\n".join(lines)
+
+    @property
+    def scrollback_len(self) -> int:
+        return len(self._scrollback)
+
+    def get_scrollback_plain_text(self, idx: int) -> str:
+        if idx < 0 or idx >= len(self._scrollback):
+            return ""
+        runs = self._scrollback[idx]
+        return "".join(text for text, _ in runs).rstrip()
+
+    def get_line_plain_text(self, logical_y: int) -> str:
+        sb_len = len(self._scrollback)
+        if logical_y < 0:
+            return ""
+        if logical_y < sb_len:
+            return self.get_scrollback_plain_text(logical_y)
+        screen_y = logical_y - sb_len
+        if screen_y >= self.rows:
+            return ""
+        with self._screen_lock:
+            line = self.screen.buffer.get(screen_y, {})
+            row_chars: list[str] = []
+            for x in range(self.cols):
+                ch = line.get(x)
+                if ch is None:
+                    glyph = " "
+                else:
+                    glyph = _safe_glyph(ch)
+                    if "\x1b" in glyph:
+                        glyph = _OSC_RE.sub("", glyph)
+                row_chars.append(glyph)
+            return "".join(row_chars).rstrip()
+
+    def total_lines(self) -> int:
+        return len(self._scrollback) + self.rows
+
+    def build_scrollback_render_text(
+        self,
+        scroll_offset: int,
+        *,
+        cursor_pos: tuple[int, int] | None = None,
+        search_highlight_lines: set[int] | None = None,
+        search_matches: list[tuple[int, int, int]] | None = None,
+        sel_start: tuple[int, int] | None = None,
+        sel_end: tuple[int, int] | None = None,
+    ) -> TerminalContent:
+        sb_len = len(self._scrollback)
+        offset = max(0, min(scroll_offset, sb_len))
+        lines: list[str] = []
+        with self._screen_lock:
+            for vis_y in range(self.rows):
+                logical_y = sb_len - offset + vis_y
+                if logical_y < 0:
+                    lines.append("")
+                    continue
+                if logical_y < sb_len:
+                    line_str = self._scrollback[logical_y]
+                else:
+                    screen_y = logical_y - sb_len
+                    if screen_y >= self.rows:
+                        lines.append("")
+                        continue
+                    line_str = self.screen.render_row_to_ansi(screen_y, draw_cursor=False)
+
+                if search_matches:
+                    line_parts: list[str] = []
+                    last_end = 0
+                    plain = self.get_line_plain_text(logical_y)
+                    for m_y, m_x, m_len in search_matches:
+                        if m_y != logical_y:
+                            continue
+                        if m_x > last_end:
+                            line_parts.append(plain[last_end:m_x])
+                        line_parts.append(f"\x1b[7m{plain[m_x:m_x + m_len]}\x1b[0m")
+                        last_end = m_x + m_len
+                    if line_parts:
+                        if last_end < len(plain):
+                            line_parts.append(plain[last_end:])
+                        line_str = "".join(line_parts)
+
+                if sel_start is not None and sel_end is not None:
+                    s_ay, s_ax = sel_start
+                    s_by, s_bx = sel_end
+                    if (s_ay, s_ax) > (s_by, s_bx):
+                        s_ay, s_ax, s_by, s_bx = s_by, s_bx, s_ay, s_ax
+                    s_logical_ay = sb_len - offset + s_ay
+                    s_logical_by = sb_len - offset + s_by
+                    if s_logical_ay <= logical_y <= s_logical_by:
+                        plain = self.get_line_plain_text(logical_y)
+                        sel_sx = s_ax if logical_y > s_logical_ay else s_ax
+                        sel_ex = s_bx + 1 if logical_y < s_logical_by else s_bx + 1
+                        sel_sx = max(0, min(sel_sx, len(plain)))
+                        sel_ex = max(0, min(sel_ex, len(plain)))
+                        if sel_sx < sel_ex:
+                            before = plain[:sel_sx]
+                            selected = plain[sel_sx:sel_ex]
+                            after = plain[sel_ex:]
+                            line_str = f"{before}\x1b[7m{selected}\x1b[0m{after}"
+
+                if cursor_pos is not None:
+                    cx, cy = cursor_pos
+                    if cy == vis_y:
+                        line_str = f"{line_str}\x1b[7m \x1b[0m"
+
+                lines.append(line_str)
+
+        return TerminalContent(lines, self.cols, self.rows)
 
     @property
     def closed(self) -> bool:

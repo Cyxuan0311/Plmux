@@ -96,6 +96,21 @@ class FastScreen:
     def cols(self) -> int:
         return self._cscreen.cols
 
+    @property
+    def use_alt_screen(self) -> bool:
+        return bool(self._cscreen.use_alt_screen)
+
+    @property
+    def mouse_mode(self) -> int:
+        return int(self._cscreen.mouse_mode)
+
+    @property
+    def scroll_count(self) -> int:
+        return int(self._cscreen.scroll_count)
+
+    def reset_scroll_count(self) -> None:
+        self._cscreen.reset_scroll_count()
+
     def resize(self, rows: int, cols: int) -> None:
         self._cscreen.resize(rows, cols)
         self._dirty_set.clear()

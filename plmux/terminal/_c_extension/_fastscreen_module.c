@@ -172,6 +172,27 @@ FastScreen_get_cols(FastScreenObject *self, void *closure) {
 }
 
 static PyObject *
+FastScreen_get_use_alt_screen(FastScreenObject *self, void *closure) {
+    return PyBool_FromLong(self->screen.use_alt_screen);
+}
+
+static PyObject *
+FastScreen_get_mouse_mode(FastScreenObject *self, void *closure) {
+    return PyLong_FromLong(self->screen.mouse_mode);
+}
+
+static PyObject *
+FastScreen_get_scroll_count(FastScreenObject *self, void *closure) {
+    return PyLong_FromLong(self->screen.scroll_count);
+}
+
+static PyObject *
+FastScreen_reset_scroll_count(FastScreenObject *self, PyObject *Py_UNUSED(ignored)) {
+    self->screen.scroll_count = 0;
+    Py_RETURN_NONE;
+}
+
+static PyObject *
 FastScreen_render_row(FastScreenObject *self, PyObject *args) {
     int y;
     if (!PyArg_ParseTuple(args, "i", &y)) return NULL;
@@ -536,6 +557,9 @@ static PyGetSetDef FastScreen_getset[] = {
     {"dirty", (getter)FastScreen_get_dirty, NULL, NULL, NULL},
     {"rows", (getter)FastScreen_get_rows, NULL, NULL, NULL},
     {"cols", (getter)FastScreen_get_cols, NULL, NULL, NULL},
+    {"use_alt_screen", (getter)FastScreen_get_use_alt_screen, NULL, NULL, NULL},
+    {"mouse_mode", (getter)FastScreen_get_mouse_mode, NULL, NULL, NULL},
+    {"scroll_count", (getter)FastScreen_get_scroll_count, NULL, NULL, NULL},
     {NULL},
 };
 
@@ -550,6 +574,7 @@ static PyMethodDef FastScreen_methods[] = {
     {"clear_dirty", (PyCFunction)FastScreen_clear_dirty, METH_NOARGS, NULL},
     {"dump_raw", (PyCFunction)FastScreen_dump_raw, METH_NOARGS, NULL},
     {"restore_raw", (PyCFunction)FastScreen_restore_raw, METH_O, NULL},
+    {"reset_scroll_count", (PyCFunction)FastScreen_reset_scroll_count, METH_NOARGS, NULL},
     {NULL},
 };
 

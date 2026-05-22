@@ -370,9 +370,9 @@ parser_dispatch_csi(FastParser *p, int cmd) {
                 else if (v == 7) s->auto_wrap = set;
                 else if (v == 12) { /* att610 */ }
                 else if (v == 25) s->cursor_visible = set;
-                else if (v == 1000) { /* mouse */ }
-                else if (v == 1002) { /* mouse */ }
-                else if (v == 1003) { /* mouse */ }
+                else if (v == 1000) { s->mouse_mode = set ? 1 : 0; }
+                else if (v == 1002) { s->mouse_mode = set ? 2 : 0; }
+                else if (v == 1003) { s->mouse_mode = set ? 3 : 0; }
                 else if (v == 1004) { /* focus */ }
                 else if (v == 1005) { /* mouse */ }
                 else if (v == 1006) { /* mouse */ }

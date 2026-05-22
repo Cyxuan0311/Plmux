@@ -139,6 +139,8 @@ typedef struct {
     int       origin_mode;
     int       auto_wrap;
     int       pending_wrap;
+    int       mouse_mode;
+    int       scroll_count;
 } FastScreen;
 
 static inline FastCell *
