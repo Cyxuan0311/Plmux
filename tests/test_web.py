@@ -1,18 +1,15 @@
 import asyncio
 import hashlib
 import base64
-import json
 
 import pytest
 
 from plmux.web import (
     WebClientServer,
     _web_key_to_terminal,
-    _SimpleWebSocket,
     _WS_MAGIC,
     _HAS_C_KERNEL,
     _get_html,
-    reload_html,
 )
 
 
@@ -185,9 +182,6 @@ class TestCKernelAvailability:
         from plmux.web._c_extension import (
             FrameParser,
             encode_text_frame,
-            encode_binary_frame,
-            encode_close_frame,
-            encode_pong_frame,
         )
         assert FrameParser is not None
         assert encode_text_frame is not None

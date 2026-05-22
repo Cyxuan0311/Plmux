@@ -1,7 +1,6 @@
 """Tests for config loader module."""
 
 import json
-from pathlib import Path
 from unittest.mock import patch
 
 from plmux.config.loader import (

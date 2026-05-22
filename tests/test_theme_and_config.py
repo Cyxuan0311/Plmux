@@ -1,7 +1,5 @@
 import json
-from pathlib import Path
 
-from plmux.config.loader import default_user_config_dir
 from plmux.ui.theme import list_themes, load_theme, Theme
 from plmux.config.schema import PlmuxConfig
 

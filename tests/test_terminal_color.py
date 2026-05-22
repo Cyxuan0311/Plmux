@@ -1,4 +1,3 @@
-import pytest
 from plmux.terminal.fastscreen import FastScreen, FastStream
 
 

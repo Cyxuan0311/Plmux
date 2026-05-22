@@ -1,6 +1,6 @@
 """Tests for PerfStats and FrameProfiler in debug_log."""
 
-from plmux.debug_log import PerfStats, PerfTimer, FrameProfiler, get_frame_profiler
+from plmux.debug_log import PerfStats, PerfTimer, FrameProfiler
 
 
 class TestPerfStats:

@@ -1,4 +1,3 @@
-from types import SimpleNamespace
 
 from plmux.app import _send_to_sessions
 

@@ -1,6 +1,5 @@
 import sys
 import types
-import os
 import time
 
 import plmux.app as app

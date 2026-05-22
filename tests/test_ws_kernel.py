@@ -1,4 +1,3 @@
-import pytest
 
 from plmux.web._c_extension._ws_kernel import (
     FrameParser,

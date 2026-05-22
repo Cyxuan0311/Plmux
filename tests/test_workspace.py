@@ -62,6 +62,5 @@ def test_cycle_layout_builders(monkeypatch):
     # add panes so layout functions have >1 pane
     ws.split("row")
     ws.split("row")
-    before = ws.tree
     ws.cycle_layout()
     assert ws.tree is not None
