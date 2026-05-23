@@ -31,22 +31,32 @@ def parse_mouse_event(seq: str) -> dict | None:
     return None
 
 
+_BORDER_TOLERANCE = 2
+
+
 def detect_border_at(
     tree, rects: dict, x: int, y: int, inner_rows: int, inner_cols: int
 ) -> tuple[str, int, int] | None:
     if len(rects) < 2:
         return None
+    best: tuple[int, tuple[str, int, int]] | None = None
     for idx_a, r_a in rects.items():
         for idx_b, r_b in rects.items():
             if idx_a >= idx_b:
                 continue
             if r_a.col + r_a.cols == r_b.col and r_a.row <= y < r_a.row + r_a.rows:
-                if x == r_a.col + r_a.cols - 1 or x == r_b.col:
-                    return ("col", idx_a, idx_b)
+                border_x = r_a.col + r_a.cols - 1
+                dist = abs(x - border_x)
+                if dist <= _BORDER_TOLERANCE:
+                    if best is None or dist < best[0]:
+                        best = (dist, ("col", idx_a, idx_b))
             if r_a.row + r_a.rows == r_b.row and r_a.col <= x < r_a.col + r_a.cols:
-                if y == r_a.row + r_a.rows - 1 or y == r_b.row:
-                    return ("row", idx_a, idx_b)
-    return None
+                border_y = r_a.row + r_a.rows - 1
+                dist = abs(y - border_y)
+                if dist <= _BORDER_TOLERANCE:
+                    if best is None or dist < best[0]:
+                        best = (dist, ("row", idx_a, idx_b))
+    return best[1] if best is not None else None
 
 
 def _pane_indices(tree) -> set[int]:
@@ -131,7 +141,7 @@ def handle_mouse_event(
                         delta = dx / inner_cols
                         direction = "right" if delta > 0 else "left"
                         delta = abs(delta)
-                        if delta > 0.001:
+                        if delta > 0.005:
                             new_tree = adjust_ratio(ws.tree, resize_pane_a, direction, delta)
                             if new_tree is not None:
                                 ws.tree = new_tree
@@ -141,7 +151,7 @@ def handle_mouse_event(
                         delta = dy / inner_rows
                         direction = "down" if delta > 0 else "up"
                         delta = abs(delta)
-                        if delta > 0.001:
+                        if delta > 0.005:
                             new_tree = adjust_ratio(ws.tree, resize_pane_a, direction, delta)
                             if new_tree is not None:
                                 ws.tree = new_tree

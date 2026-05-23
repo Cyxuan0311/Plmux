@@ -43,6 +43,7 @@ class KeysConfig:
         "resize-up": ["K"],
         "resize-down": ["J"],
         "zoom": ["z"],
+        "command-line": [":"],
     })
 
 

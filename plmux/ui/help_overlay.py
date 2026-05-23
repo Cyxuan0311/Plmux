@@ -98,8 +98,9 @@ def _build_shortcuts_table(theme: Theme, *, bindings: dict[str, list[str]] | Non
         (_keys("copy-mode"), "Enter copy mode"),
         (_keys("help"), "Open this help panel"),
         (_keys("detach"), "Detach session (keep running in background)"),
-        ("Esc + :", "Enter command mode"),
+        (_keys("command-line"), "Enter command-line mode"),
         ("^Q", "Force quit plmux"),
+        ("Esc", "Pass through to child program (e.g. vim)"),
     ]
     for key, action in rows:
         t.add_row(key, action)
