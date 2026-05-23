@@ -4,7 +4,7 @@ import time
 import pytest
 
 from plmux.terminal.session import TerminalSession
-from plmux.app import _extract_selected_text_from_session
+from plmux.modes.copy_mode import _extract_selected_text
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="requires PTY shell (pwsh.exe) not available in CI")
@@ -38,7 +38,7 @@ def test_extract_selected_text_reverse():
         # select in reverse (end before start)
         a = (1, 5)
         b = (0, 2)
-        txt = _extract_selected_text_from_session(s, a, b)
+        txt = _extract_selected_text(s, a, b)
         assert txt != ""
         assert "abcd" in txt or "ijkl" in txt
     finally:
