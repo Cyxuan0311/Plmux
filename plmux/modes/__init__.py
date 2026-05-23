@@ -25,7 +25,6 @@ class AppContext:
     _pending_web_stop: bool = False
     running: bool = True
     dirty: bool = True
-    esc_pressed: bool = False
     detach_requested: bool = False
 
     copy_anchor: tuple[int, int] | None = None

@@ -72,6 +72,9 @@ def handle_prefix_mode(key, ctx: AppContext) -> None:
         ctx.ws.resize_pane("up")
     elif action == "resize-down":
         ctx.ws.resize_pane("down")
+    elif action == "command-line":
+        ctx.mode = "cmdline"
+        ctx.cmd_buffer = ""
     elif action == "zoom":
         ctx.ws.toggle_zoom()
     ctx.dirty = True
