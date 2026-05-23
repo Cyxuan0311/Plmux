@@ -64,6 +64,11 @@ _TREE_PIPE = "\u2502 "
 _TREE_BRANCH = "\u251C\u2500"
 _TREE_LAST = "\u2514\u2500"
 
+_ICON_DIR = "\u25B8"
+_ICON_DIR_OPEN = "\u25BE"
+_ICON_FILE = " "
+_ICON_LINK = "@"
+
 
 @dataclass
 class FileNode:
@@ -109,6 +114,29 @@ def _truncate_text(text: str, max_width: int, ellipsis: str = "...") -> str:
         result.append(ch)
         result_len += ch_len
     return "".join(result) + ellipsis
+
+
+def _wrap_line(text: str, max_width: int) -> list[str]:
+    if max_width <= 0:
+        return [text] if text else []
+    if not text:
+        return [""]
+    if cell_len(text) <= max_width:
+        return [text]
+    lines: list[str] = []
+    current: list[str] = []
+    current_len = 0
+    for ch in text:
+        ch_len = cell_len(ch)
+        if current_len + ch_len > max_width and current:
+            lines.append("".join(current))
+            current = []
+            current_len = 0
+        current.append(ch)
+        current_len += ch_len
+    if current:
+        lines.append("".join(current))
+    return lines
 
 
 def _format_perms(mode: int) -> str:
@@ -382,9 +410,11 @@ def handle_file_browser_mode(key, ctx: Any) -> None:
     elif name in ("KEY_DOWN",) or ch == "j":
         cursor = min(len(flat) - 1, cursor + 1)
     elif name == "KEY_PGUP":
-        cursor = max(0, cursor - 10)
+        half_page = max(1, state.get("visible_rows", 20) // 2)
+        cursor = max(0, cursor - half_page)
     elif name == "KEY_PGDOWN":
-        cursor = min(len(flat) - 1, cursor + 10)
+        half_page = max(1, state.get("visible_rows", 20) // 2)
+        cursor = min(len(flat) - 1, cursor + half_page)
     elif name == "KEY_HOME" or ch == "g":
         cursor = 0
     elif name == "KEY_END" or ch == "G":
@@ -456,68 +486,68 @@ handle_file_browser_mode._on_enter = _on_enter
 def _file_type_tag(name: str) -> tuple[str, str]:
     suffix = Path(name).suffix.lower()
     tags = {
-        ".py": ("py", "bold white on #306998"),
-        ".js": ("js", "bold white on #f7df1e"),
-        ".ts": ("ts", "bold white on #3178c6"),
-        ".tsx": ("tsx", "bold white on #3178c6"),
-        ".jsx": ("jsx", "bold white on #61dafb"),
-        ".rs": ("rs", "bold white on #dea584"),
-        ".go": ("go", "bold white on #00add8"),
-        ".java": ("java", "bold white on #b07219"),
-        ".rb": ("rb", "bold white on #cc342d"),
-        ".c": ("c", "bold white on #555555"),
-        ".h": ("h", "bold white on #555555"),
-        ".cpp": ("c++", "bold white on #f34b7d"),
-        ".hpp": ("h++", "bold white on #f34b7d"),
-        ".cs": ("cs", "bold white on #178600"),
-        ".md": ("md", "bold white on #083fa1"),
-        ".json": ("json", "bold black on #f1e05a"),
-        ".yaml": ("yml", "bold white on #cb171e"),
-        ".yml": ("yml", "bold white on #cb171e"),
-        ".toml": ("toml", "bold white on #9c4221"),
-        ".cfg": ("cfg", "bold white on #555"),
-        ".ini": ("ini", "bold white on #555"),
-        ".sh": ("sh", "bold white on #89e051"),
-        ".bash": ("sh", "bold white on #89e051"),
-        ".zsh": ("zsh", "bold white on #89e051"),
-        ".html": ("html", "bold white on #e34c26"),
-        ".css": ("css", "bold white on #563d7c"),
-        ".scss": ("scss", "bold white on #c6538c"),
-        ".sql": ("sql", "bold white on #e38c00"),
-        ".xml": ("xml", "bold white on #555"),
-        ".env": ("env", "bold white on #ecd53f"),
-        ".lock": ("lock", "bold white on #555"),
-        ".log": ("log", "bold white on #555"),
-        ".txt": ("txt", "bold white on #555"),
-        ".lua": ("lua", "bold white on #000080"),
-        ".vim": ("vim", "bold white on #019833"),
-        ".hs": ("hs", "bold white on #5e5086"),
-        ".swift": ("swift", "bold white on #f05138"),
-        ".kt": ("kt", "bold white on #a97bff"),
-        ".dart": ("dart", "bold white on #00b4ab"),
-        ".r": ("r", "bold white on #276dc3"),
-        ".php": ("php", "bold white on #4f5d95"),
-        ".pl": ("pl", "bold white on #0298c3"),
-        ".ex": ("ex", "bold white on #6e4a7e"),
-        ".erl": ("erl", "bold white on #b83998"),
-        ".scala": ("scala", "bold white on #c22d40"),
-        ".diff": ("diff", "bold white on #3a3"),
-        ".patch": ("patch", "bold white on #3a3"),
-        ".csv": ("csv", "bold white on #e38c00"),
-        ".tf": ("tf", "bold white on #7b42bc"),
-        ".proto": ("proto", "bold white on #3a7ca5"),
-        ".graphql": ("gql", "bold white on #e535ab"),
+        ".py": ("py", "#3572A5"),
+        ".js": ("js", "#f1e05a"),
+        ".ts": ("ts", "#3178c6"),
+        ".tsx": ("tsx", "#3178c6"),
+        ".jsx": ("jsx", "#61dafb"),
+        ".rs": ("rs", "#dea584"),
+        ".go": ("go", "#00add8"),
+        ".java": ("java", "#b07219"),
+        ".rb": ("rb", "#cc342d"),
+        ".c": ("c", "#555555"),
+        ".h": ("h", "#777"),
+        ".cpp": ("c++", "#f34b7d"),
+        ".hpp": ("h++", "#f34b7d"),
+        ".cs": ("cs", "#178600"),
+        ".md": ("md", "#519aba"),
+        ".json": ("json", "#cbcb41"),
+        ".yaml": ("yml", "#cb171e"),
+        ".yml": ("yml", "#cb171e"),
+        ".toml": ("toml", "#9c4221"),
+        ".cfg": ("cfg", "#6a9955"),
+        ".ini": ("ini", "#6a9955"),
+        ".sh": ("sh", "#89e051"),
+        ".bash": ("sh", "#89e051"),
+        ".zsh": ("zsh", "#89e051"),
+        ".html": ("html", "#e37933"),
+        ".css": ("css", "#563d7c"),
+        ".scss": ("scss", "#c6538c"),
+        ".sql": ("sql", "#e38c00"),
+        ".xml": ("xml", "#e37933"),
+        ".env": ("env", "#ecd53f"),
+        ".lock": ("lock", "#6a9955"),
+        ".log": ("log", "#888"),
+        ".txt": ("txt", "#888"),
+        ".lua": ("lua", "#000080"),
+        ".vim": ("vim", "#019833"),
+        ".hs": ("hs", "#5e5086"),
+        ".swift": ("swift", "#f05138"),
+        ".kt": ("kt", "#a97bff"),
+        ".dart": ("dart", "#00b4ab"),
+        ".r": ("r", "#276dc3"),
+        ".php": ("php", "#4f5d95"),
+        ".pl": ("pl", "#0298c3"),
+        ".ex": ("ex", "#6e4a7e"),
+        ".erl": ("erl", "#b83998"),
+        ".scala": ("scala", "#c22d40"),
+        ".diff": ("diff", "#5c8a5c"),
+        ".patch": ("patch", "#5c8a5c"),
+        ".csv": ("csv", "#e38c00"),
+        ".tf": ("tf", "#7b42bc"),
+        ".proto": ("proto", "#3a7ca5"),
+        ".graphql": ("gql", "#e535ab"),
     }
-    tag, style = tags.get(suffix, ("", ""))
+    tag, color = tags.get(suffix, ("", ""))
     if not tag:
         if name == "Makefile" or name == "Dockerfile":
-            return (name[:4].lower(), "bold white on #555")
+            return (name[:4].lower(), "#6a9955")
         if name == "LICENSE" or name == "README" or name.startswith("README"):
-            return ("doc", "bold white on #083fa1")
+            return ("doc", "#519aba")
         if name.startswith(".git"):
-            return ("git", "bold white on #f05032")
+            return ("git", "#f05032")
         return ("", "")
-    return (tag, style)
+    return (tag, color)
 
 
 def build_file_browser_overlay(
@@ -546,17 +576,19 @@ def build_file_browser_overlay(
     preview_width = max_w - tree_width - 4
 
     visible_rows = max(1, max_h - 6)
+    _SCROLL_MARGIN = max(2, visible_rows // 6)
 
     if total <= visible_rows:
         scroll_offset = 0
     else:
-        if cursor < scroll_offset:
-            scroll_offset = cursor
-        elif cursor >= scroll_offset + visible_rows:
-            scroll_offset = cursor - visible_rows + 1
+        if cursor < scroll_offset + _SCROLL_MARGIN:
+            scroll_offset = cursor - _SCROLL_MARGIN
+        elif cursor >= scroll_offset + visible_rows - _SCROLL_MARGIN:
+            scroll_offset = cursor - visible_rows + _SCROLL_MARGIN + 1
         scroll_offset = max(0, min(scroll_offset, total - visible_rows))
 
     plugin_state["scroll_offset"] = scroll_offset
+    plugin_state["visible_rows"] = visible_rows
 
     visible_end = min(scroll_offset + visible_rows, total)
 
@@ -570,64 +602,63 @@ def build_file_browser_overlay(
     tree_grid.add_row(Text(""))
 
     if scroll_offset > 0:
-        tree_grid.add_row(Text(f"  \u2502 ({scroll_offset} above)", style="dim cyan"))
+        tree_grid.add_row(Text(f"  \u2502 \u2191{scroll_offset}", style="dim #665c54"))
 
     for i in range(scroll_offset, visible_end):
         node, prefix = flat[i]
+        is_cursor = i == cursor
         row = Text()
 
-        cursor_indicator = " \u25B6" if i == cursor else "  "
-        cursor_w = cell_len(cursor_indicator)
         prefix_w = cell_len(prefix)
-        tag_w = 0
-        tag, tag_style = _file_type_tag(node.name)
+        tag, tag_color = _file_type_tag(node.name)
 
         if node.is_dir:
-            marker = f" {_DIR_MARKER_OPEN} " if node.path in expanded_set else f" {_DIR_MARKER_CLOSED} "
-            marker_w = cell_len(marker)
-            used_w = cursor_w + prefix_w + marker_w + 1
-            name_avail = tree_width - used_w
-            display_name = _truncate_text(node.name, max(1, name_avail - 1))
-
-            if i == cursor:
-                row.append(cursor_indicator, style="bold black on #85c751")
-            else:
-                row.append(cursor_indicator)
-            row.append(prefix, style="dim #5c6370")
-            row.append(marker, style="bold cyan")
-            if i == cursor:
-                row.append(display_name, style="bold black on #85c751")
-            else:
-                row.append(display_name, style="bold cyan")
-            row.append("/", style="cyan")
-        else:
-            if tag:
-                tag_str = f" {tag} "
-                tag_w = cell_len(tag_str)
-                row.append(cursor_indicator, style="bold black on #85c751" if i == cursor else "")
-                row.append(prefix, style="dim #5c6370")
-                row.append(tag_str, style=tag_style)
-                row.append(" ", style="")
-            else:
-                tag_w = 3
-                row.append(cursor_indicator, style="bold black on #85c751" if i == cursor else "")
-                row.append(prefix, style="dim #5c6370")
-                row.append("   ")
-
-            used_w = cursor_w + prefix_w + tag_w
+            icon = _ICON_DIR_OPEN if node.path in expanded_set else _ICON_DIR
+            icon_w = cell_len(icon)
+            used_w = prefix_w + icon_w + 2
             name_avail = tree_width - used_w
             display_name = _truncate_text(node.name, max(1, name_avail))
 
-            if i == cursor:
-                row.append(display_name, style="bold black on #85c751")
+            row.append(prefix, style="dim #665c54")
+            if is_cursor:
+                row.append(f" {icon} ", style="bold #83a598 on #504945")
+                row.append(display_name, style="bold #83a598 on #504945")
             else:
-                row.append(display_name, style="white")
+                row.append(f" {icon} ", style="#83a598")
+                row.append(display_name, style="#83a598")
+        else:
+            if tag:
+                icon = tag
+                icon_w = cell_len(icon)
+                used_w = prefix_w + icon_w + 2
+                name_avail = tree_width - used_w
+                display_name = _truncate_text(node.name, max(1, name_avail))
+
+                row.append(prefix, style="dim #665c54")
+                if is_cursor:
+                    row.append(f" {icon} ", style=f"bold {tag_color} on #504945")
+                    row.append(display_name, style=f"bold {tag_color} on #504945")
+                else:
+                    row.append(f" {icon} ", style=tag_color)
+                    row.append(display_name, style=tag_color)
+            else:
+                used_w = prefix_w + 3
+                name_avail = tree_width - used_w
+                display_name = _truncate_text(node.name, max(1, name_avail))
+
+                row.append(prefix, style="dim #665c54")
+                if is_cursor:
+                    row.append(f" {_ICON_FILE} ", style="on #504945")
+                    row.append(display_name, style="on #504945")
+                else:
+                    row.append(f" {_ICON_FILE} ", style="")
+                    row.append(display_name, style="#d5c4a1")
 
         tree_grid.add_row(row)
 
     if visible_end < total:
         remaining = total - visible_end
-        tree_grid.add_row(Text(f"  \u2502 ({remaining} below)", style="dim cyan"))
+        tree_grid.add_row(Text(f"  \u2502 \u2193{remaining}", style="dim #665c54"))
 
     preview_grid = Table.grid(padding=(0, 0))
     preview_grid.add_column(width=preview_width)
@@ -643,16 +674,36 @@ def build_file_browser_overlay(
 
         if preview_is_text:
             content_width = preview_width - 6
+            text_grid = Table.grid(padding=(0, 0))
+            text_grid.add_column(width=4)
+            text_grid.add_column(width=1)
+            text_grid.add_column()
             for line_no, line in enumerate(preview_text.split("\n"), 1):
-                display_line = _truncate_text(line, max(1, content_width))
-                num = Text(f"{line_no:4} ", style="dim #5c6370")
-                content = Text(display_line, style="white")
-                preview_grid.add_row(Text.assemble(num, content))
+                wrapped = _wrap_line(line, max(1, content_width))
+                for wi, segment in enumerate(wrapped):
+                    if wi == 0:
+                        text_grid.add_row(
+                            Text(f"{line_no:>4}", style="dim #5c6370"),
+                            Text(" "),
+                            Text(segment, style="white"),
+                        )
+                    else:
+                        text_grid.add_row(
+                            Text("    ", style="dim #5c6370"),
+                            Text(" "),
+                            Text(segment, style="white"),
+                        )
+            preview_grid.add_row(text_grid)
         else:
             content_width = preview_width - 2
+            continuation_indent = "  "
             for line in preview_text.split("\n"):
-                display_line = _truncate_text(line, max(1, content_width))
-                preview_grid.add_row(Text(display_line, style="dim italic"))
+                wrapped = _wrap_line(line, max(1, content_width))
+                for wi, segment in enumerate(wrapped):
+                    if wi == 0:
+                        preview_grid.add_row(Text(segment, style="dim italic"))
+                    else:
+                        preview_grid.add_row(Text(continuation_indent + segment, style="dim italic"))
     else:
         preview_grid.add_row(Text("Select a file to preview", style="dim italic"))
 
