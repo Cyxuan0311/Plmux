@@ -54,14 +54,14 @@ Implementation: [schema.py](../plmux/config/schema.py) | [prefix.py](../plmux/mo
 | Enter copy mode | `[` | Enter text selection mode |
 | Show help | `?` | Open the help overlay |
 | Detach session | `d` | Detach from the session (session continues in background) |
-| Enter command line | `Esc` then `:` | Open the `:` command prompt |
+| Enter command line | `:` | Open the `:` command prompt |
 
 ## Direct Keys (No Prefix)
 
 | Key | Action |
 |-----|--------|
 | `Ctrl+Q` | Force quit plmux |
-| `Esc` | Enter escape-wait state; if followed by `:`, enters command mode |
+| `Esc` | Passed through directly to the child program (e.g. vim exit insert mode) |
 
 ## Mouse Operations
 
@@ -107,7 +107,7 @@ Implementation: [copy_mode.py](../plmux/modes/copy_mode.py)
 
 ## Command Line Mode
 
-Press `Esc` then `:` to enter command mode. Use `Tab` for auto-completion.
+Press `Prefix` then `:` to enter command mode. Use `Tab` for auto-completion.
 
 Implementation: [commands.py](../plmux/input/commands.py)
 
@@ -201,7 +201,8 @@ Key bindings can be customized in `config.json` under `keys.bindings`:
       "resize-right": ["L"],
       "resize-up": ["K"],
       "resize-down": ["J"],
-      "zoom": ["z"]
+      "zoom": ["z"],
+      "command-line": [":"]
     }
   }
 }
@@ -233,5 +234,6 @@ Each action maps to a list of keys. The first matching key triggers the action. 
 | `resize-up` | Resize pane up |
 | `resize-down` | Resize pane down |
 | `zoom` | Toggle pane zoom |
+| `command-line` | Enter command-line mode |
 
 Implementation: [schema.py](../plmux/config/schema.py) | [prefix.py](../plmux/modes/prefix.py)

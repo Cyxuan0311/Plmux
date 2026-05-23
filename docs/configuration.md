@@ -51,7 +51,8 @@ Implementation: [loader.py](../plmux/config/loader.py#L24-L28)
       "resize-right": ["L"],
       "resize-up": ["K"],
       "resize-down": ["J"],
-      "zoom": ["z"]
+      "zoom": ["z"],
+      "command-line": [":"]
     }
   },
   "session": {
@@ -129,6 +130,7 @@ Each key in `bindings` maps an action name to a list of key strings. The first m
 | `resize-up` | `["K"]` | Resize pane up |
 | `resize-down` | `["J"]` | Resize pane down |
 | `zoom` | `["z"]` | Toggle pane zoom |
+| `command-line` | `[":"]` | Enter command-line mode |
 
 For the full key binding reference including copy mode, command mode, and overlay modes, see [Key Bindings](keybindings.md).
 

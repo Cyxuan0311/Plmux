@@ -93,6 +93,7 @@ All key bindings are prefixed by **Ctrl+B** (configurable). See [Key Bindings](d
 | Resize pane | Prefix + `H` `J` `K` `L` |
 | Show help | Prefix + `?` |
 | Detach session | Prefix + `d` |
+| Enter command line | Prefix + `:` |
 | Close window | Prefix + `&` |
 | Force quit | `Ctrl+Q` |
 
@@ -112,7 +113,7 @@ See [Copy Mode](docs/copy_mode.en.md) for full documentation.
 
 ### Command Line
 
-Press `Esc` then `:` to enter command mode.
+Press `Prefix` then `:` to enter command mode.
 
 | Command | Description |
 |---------|-------------|
@@ -177,8 +178,6 @@ plmux uses C extensions for performance-critical paths and a modular architectur
 
 - **FastScreen** (`plmux/terminal/_c_extension/`): ANSI parsing, screen state management, and rendering — falls back to a pure-Python pyte backend when unavailable
 - **WebSocket Kernel** (`plmux/web/_c_extension/`): Frame parsing and encoding for browser terminal — falls back to pure-Python WebSocket when unavailable
-- **Mouse Handler** (`plmux/app/mouse_handler.py`): Decoupled mouse event processing — scroll, click-to-focus, drag-to-resize, and child program mouse forwarding
-- **Terminal Session** (`plmux/terminal/session.py`): PTY-backed terminal with public API for scroll offset, copy mode state, and scrollback buffer management
 
 Both C extensions are optional; plmux works without them using Python fallbacks.
 

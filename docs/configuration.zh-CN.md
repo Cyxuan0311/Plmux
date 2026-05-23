@@ -51,7 +51,8 @@
       "resize-right": ["L"],
       "resize-up": ["K"],
       "resize-down": ["J"],
-      "zoom": ["z"]
+      "zoom": ["z"],
+      "command-line": [":"]
     }
   },
   "session": {
@@ -129,6 +130,7 @@
 | `resize-up` | `["K"]` | 向上调整窗格大小 |
 | `resize-down` | `["J"]` | 向下调整窗格大小 |
 | `zoom` | `["z"]` | 切换窗格缩放 |
+| `command-line` | `[":"]` | 进入命令行模式 |
 
 完整的快捷键参考（包括复制模式、命令模式和覆盖层模式），请参见[快捷键](keybindings.zh-CN.md)。
 
