@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional
 
 from plmux.extensions.registry import ExtensionContext, emit_hook, get_plugin_commands
-from plmux.workspace import PaneWorkspace
+from plmux.workspace import TmuxServer
 
 
 def _split_ws(line: str) -> List[str]:
@@ -30,41 +30,51 @@ class CommandResult:
     stop_web_server: bool = False
     reload_config: bool = False
     plugin_overlay: Optional[str] = None
+    toggle_broadcast: Optional[bool] = None
+    toggle_clock_mode: Optional[bool] = None
+    toggle_rect_mode: Optional[bool] = None
+    pet_mode: Optional[str] = None
+    rename_window: Optional[str] = None
+    rename_session: Optional[str] = None
+    switch_session: Optional[int] = None
+    new_session_name: Optional[str] = None
+    kill_session_idx: Optional[int] = None
+    remote_command: Optional[dict] = None
 
 
-def _cmd_exit(ws: PaneWorkspace, args: List[str]) -> CommandResult:
+def _cmd_exit(ws: TmuxServer, args: List[str]) -> CommandResult:
     return CommandResult(quit=True, hard_quit=True)
 
 
-def _cmd_only(ws: PaneWorkspace, args: List[str]) -> CommandResult:
+def _cmd_only(ws: TmuxServer, args: List[str]) -> CommandResult:
     ws.only_pane()
-    return CommandResult("only this pane")
+    return CommandResult("only this pane", remote_command={"action": "only_pane"})
 
 
-def _cmd_split(ws: PaneWorkspace, args: List[str]) -> CommandResult:
+def _cmd_split(ws: TmuxServer, args: List[str]) -> CommandResult:
     ws.split("col")
-    return CommandResult("split (stacked)")
+    return CommandResult("split (stacked)", remote_command={"action": "split", "direction": "col"})
 
 
-def _cmd_vsplit(ws: PaneWorkspace, args: List[str]) -> CommandResult:
+def _cmd_vsplit(ws: TmuxServer, args: List[str]) -> CommandResult:
     ws.split("row")
-    return CommandResult("vsplit (side-by-side)")
+    return CommandResult("vsplit (side-by-side)", remote_command={"action": "split", "direction": "row"})
 
 
-def _cmd_focus(ws: PaneWorkspace, args: List[str]) -> CommandResult:
+def _cmd_focus(ws: TmuxServer, args: List[str]) -> CommandResult:
     if not args:
         return CommandResult("usage: focus <n>")
     try:
         n = int(args[0])
     except ValueError:
         return CommandResult("focus: need integer")
-    if 0 <= n < len(ws.sessions):
+    if 0 <= n < len(ws._window().panes):
         ws.set_focus_pane(n)
-        return CommandResult(f"focus -> {n}")
+        return CommandResult(f"focus -> {n}", remote_command={"action": "set_focus_pane", "index": n})
     return CommandResult("focus: out of range")
 
 
-def _cmd_theme(ws: PaneWorkspace, args: List[str]) -> CommandResult:
+def _cmd_theme(ws: TmuxServer, args: List[str]) -> CommandResult:
     from plmux.ui.theme import list_themes, load_theme
 
     available = list_themes()
@@ -80,28 +90,28 @@ def _cmd_theme(ws: PaneWorkspace, args: List[str]) -> CommandResult:
     return CommandResult(f"theme -> {name}", theme_changed=name)
 
 
-def _cmd_help(ws: PaneWorkspace, args: List[str]) -> CommandResult:
+def _cmd_help(ws: TmuxServer, args: List[str]) -> CommandResult:
     return CommandResult(show_help=True)
 
 
-def _cmd_ls(ws: PaneWorkspace, args: List[str]) -> CommandResult:
+def _cmd_ls(ws: TmuxServer, args: List[str]) -> CommandResult:
     return CommandResult(show_session_list=True)
 
 
-def _cmd_plugin(ws: PaneWorkspace, args: List[str]) -> CommandResult:
+def _cmd_plugin(ws: TmuxServer, args: List[str]) -> CommandResult:
     return CommandResult(show_plugin_list=True)
 
 
-def _cmd_layout(ws: PaneWorkspace, args: List[str]) -> CommandResult:
+def _cmd_layout(ws: TmuxServer, args: List[str]) -> CommandResult:
     if args:
         name = args[0]
         if ws.apply_layout_template(name):
-            return CommandResult(message=f"Layout applied: {name}")
+            return CommandResult(message=f"Layout applied: {name}", remote_command={"action": "apply_layout_template", "name": name})
         return CommandResult(message=f"Unknown layout: {name}")
     return CommandResult(show_layout_list=True)
 
 
-def _cmd_web(ws: PaneWorkspace, args: List[str]) -> CommandResult:
+def _cmd_web(ws: TmuxServer, args: List[str]) -> CommandResult:
     port = 9888
     if args:
         try:
@@ -111,18 +121,122 @@ def _cmd_web(ws: PaneWorkspace, args: List[str]) -> CommandResult:
     return CommandResult(start_web_server=True, web_port=port)
 
 
-def _cmd_webstop(ws: PaneWorkspace, args: List[str]) -> CommandResult:
+def _cmd_webstop(ws: TmuxServer, args: List[str]) -> CommandResult:
     return CommandResult(stop_web_server=True)
 
 
-def _cmd_reload(ws: PaneWorkspace, args: List[str]) -> CommandResult:
+def _cmd_reload(ws: TmuxServer, args: List[str]) -> CommandResult:
     return CommandResult(reload_config=True)
+
+
+def _cmd_sync(ws: TmuxServer, args: List[str]) -> CommandResult:
+    if not args:
+        return CommandResult(toggle_broadcast=True)
+    val = args[0].lower()
+    if val in ("on", "yes", "1", "true"):
+        return CommandResult(toggle_broadcast=True, message="synchronize-panes on")
+    if val in ("off", "no", "0", "false"):
+        return CommandResult(toggle_broadcast=False, message="synchronize-panes off")
+    return CommandResult("usage: sync [on|off]")
+
+
+def _cmd_rotate(ws: TmuxServer, args: List[str]) -> CommandResult:
+    direction = "up"
+    if args:
+        d = args[0].lower()
+        if d in ("down", "d"):
+            direction = "down"
+        elif d in ("up", "u"):
+            direction = "up"
+        else:
+            return CommandResult("usage: rotate [up|down]")
+    ws.rotate_panes(direction)
+    return CommandResult(f"rotate-window {direction}", remote_command={"action": "rotate_panes", "direction": direction})
+
+
+def _cmd_clock_mode(ws: TmuxServer, args: List[str]) -> CommandResult:
+    return CommandResult(toggle_clock_mode=True)
+
+
+def _cmd_pet(ws: TmuxServer, args: List[str]) -> CommandResult:
+    from plmux.ui.pet_animation import get_pet_names
+    if not args:
+        return CommandResult(pet_mode="cat")
+    pet_type = args[0].lower()
+    if pet_type == "off":
+        return CommandResult(pet_mode="off")
+    if pet_type == "list":
+        return CommandResult(message="pets: " + ", ".join(get_pet_names()))
+    if pet_type not in get_pet_names():
+        return CommandResult(message=f"unknown pet: {pet_type}. available: " + ", ".join(get_pet_names()))
+    return CommandResult(pet_mode=pet_type)
+
+
+def _cmd_rectangle_toggle(ws: TmuxServer, args: List[str]) -> CommandResult:
+    return CommandResult(toggle_rect_mode=True)
+
+
+def _cmd_rename_window(ws: TmuxServer, args: List[str]) -> CommandResult:
+    name = " ".join(args).strip()
+    if not name:
+        return CommandResult(message="usage: rename-window <name>")
+    return CommandResult(rename_window=name)
+
+
+def _cmd_rename_session(ws: TmuxServer, args: List[str]) -> CommandResult:
+    name = " ".join(args).strip()
+    if not name:
+        return CommandResult(message="usage: rename-session <name>")
+    return CommandResult(rename_session=name)
+
+
+def _cmd_new_session(ws: TmuxServer, args: List[str]) -> CommandResult:
+    name = " ".join(args).strip()
+    return CommandResult(new_session_name=name or "")
+
+
+def _cmd_kill_session(ws: TmuxServer, args: List[str]) -> CommandResult:
+    if args:
+        try:
+            idx = int(args[0])
+            return CommandResult(kill_session_idx=idx)
+        except ValueError:
+            found = ws.find_session(args[0])
+            if found >= 0:
+                return CommandResult(kill_session_idx=found)
+            return CommandResult(message=f"session not found: {args[0]}")
+    return CommandResult(kill_session_idx=None)
+
+
+def _cmd_switch_session(ws: TmuxServer, args: List[str]) -> CommandResult:
+    if not args:
+        return CommandResult(show_session_list=True)
+    try:
+        idx = int(args[0])
+        return CommandResult(switch_session=idx)
+    except ValueError:
+        found = ws.find_session(args[0])
+        if found >= 0:
+            return CommandResult(switch_session=found)
+        return CommandResult(message=f"session not found: {args[0]}")
+
+
+def _cmd_next_session(ws: TmuxServer, args: List[str]) -> CommandResult:
+    ws.next_session()
+    return CommandResult(message=f"session -> {ws.session_name}", remote_command={"action": "next_session"})
+
+
+def _cmd_prev_session(ws: TmuxServer, args: List[str]) -> CommandResult:
+    ws.prev_session()
+    return CommandResult(message=f"session -> {ws.session_name}", remote_command={"action": "prev_session"})
 
 
 _ALIASES = {
     "sp": "split",
     "vsp": "vsplit",
     "vs": "vsplit",
+    "synchronize-panes": "sync",
+    "rotate-window": "rotate",
 }
 
 _COMMANDS: Dict[str, Callable] = {
@@ -145,6 +259,27 @@ _COMMANDS: Dict[str, Callable] = {
     "webstop": _cmd_webstop,
     "reload": _cmd_reload,
     "source": _cmd_reload,
+    "sync": _cmd_sync,
+    "synchronize-panes": _cmd_sync,
+    "rotate": _cmd_rotate,
+    "rotate-window": _cmd_rotate,
+    "clock-mode": _cmd_clock_mode,
+    "pet": _cmd_pet,
+    "rectangle-toggle": _cmd_rectangle_toggle,
+    "rename-window": _cmd_rename_window,
+    "renamew": _cmd_rename_window,
+    "rename-session": _cmd_rename_session,
+    "renames": _cmd_rename_session,
+    "new-session": _cmd_new_session,
+    "new": _cmd_new_session,
+    "kill-session": _cmd_kill_session,
+    "kills": _cmd_kill_session,
+    "switch-session": _cmd_switch_session,
+    "switchs": _cmd_switch_session,
+    "next-session": _cmd_next_session,
+    "nexts": _cmd_next_session,
+    "prev-session": _cmd_prev_session,
+    "prevs": _cmd_prev_session,
 }
 
 
@@ -191,10 +326,24 @@ def get_completions(prefix: str) -> List[str]:
         from plmux.workspace import LAYOUT_TEMPLATES
         return [t.name for t in LAYOUT_TEMPLATES if t.name.startswith(word)]
 
+    if cmd in ("sync", "synchronize-panes") and (len(parts) == 2 or (len(parts) == 1 and has_trailing_space)):
+        return [s for s in ("on", "off") if s.startswith(word)]
+
+    if cmd in ("rotate", "rotate-window") and (len(parts) == 2 or (len(parts) == 1 and has_trailing_space)):
+        return [s for s in ("up", "down") if s.startswith(word)]
+
+    if cmd == "pet" and (len(parts) == 2 or (len(parts) == 1 and has_trailing_space)):
+        from plmux.ui.pet_animation import get_pet_names
+        pet_opts = list(get_pet_names()) + ["off", "list"]
+        return [s for s in pet_opts if s.startswith(word)]
+
+    if cmd in ("switch-session", "switchs", "kill-session", "kills") and (len(parts) == 2 or (len(parts) == 1 and has_trailing_space)):
+        return [str(i) for i in range(10) if str(i).startswith(word)]
+
     return []
 
 
-def run_command_line(ws: PaneWorkspace, line: str) -> CommandResult:
+def run_command_line(ws: TmuxServer, line: str) -> CommandResult:
     parts = _split_ws(line)
     if not parts:
         return CommandResult()

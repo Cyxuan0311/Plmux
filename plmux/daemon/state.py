@@ -28,6 +28,8 @@ class ServerState:
     windows: List[Dict[str, Any]] = field(default_factory=list)
     current_window: int = 0
     buffer_dumps: Dict[str, str] = field(default_factory=dict)
+    sessions_data: List[Dict[str, Any]] = field(default_factory=list)
+    current_session: int = 0
 
 
 def serialize_state(state: ServerState) -> bytes:
@@ -48,6 +50,8 @@ def serialize_state(state: ServerState) -> bytes:
         "windows": state.windows,
         "current_window": state.current_window,
         "buffer_dumps": state.buffer_dumps,
+        "sessions_data": state.sessions_data,
+        "current_session": state.current_session,
     }
     return json.dumps(data).encode("utf-8")
 
@@ -73,4 +77,6 @@ def deserialize_state(raw: bytes) -> ServerState:
         windows=data.get("windows", []),
         current_window=data.get("current_window", 0),
         buffer_dumps=data.get("buffer_dumps", {}),
+        sessions_data=data.get("sessions_data", []),
+        current_session=data.get("current_session", 0),
     )

@@ -20,6 +20,7 @@ class ExtensionContext:
     extra_config: Dict[str, Any] = field(default_factory=dict)
     pane_index: int = -1
     window_index: int = -1
+    session_index: int = -1
     mode: str = ""
     command: str = ""
     message: str = ""
@@ -39,9 +40,14 @@ _BUILTIN_HOOKS = [
     "mode_changed",
     "session_saved",
     "session_loaded",
+    "session_created",
+    "session_killed",
     "command_executed",
     "command_unknown",
     "status_refresh",
+    "client_connected",
+    "client_disconnected",
+    "pane_resized",
 ]
 
 _REGISTRY: Dict[str, List[Hook]] = {name: [] for name in _BUILTIN_HOOKS}
@@ -57,6 +63,14 @@ _THROTTLED_HOOKS: Dict[str, float] = {
     "status_refresh": 2.0,
 }
 _last_emit: Dict[str, float] = {}
+
+_CONFIG_HOOKS: Dict[str, List[str]] = {}
+
+
+def load_config_hooks(hooks_config: Dict[str, List[str]]) -> None:
+    _CONFIG_HOOKS.clear()
+    for hook_name, commands in hooks_config.items():
+        _CONFIG_HOOKS[hook_name] = list(commands)
 
 
 def register_hook(name: str, fn: Hook) -> None:
@@ -76,6 +90,35 @@ def emit_hook(name: str, ctx: ExtensionContext) -> None:
             fn(ctx)
         except Exception:
             pass
+    for cmd in _CONFIG_HOOKS.get(name, []):
+        try:
+            _run_hook_command(cmd, ctx)
+        except Exception:
+            pass
+
+
+def _run_hook_command(cmd: str, ctx: ExtensionContext) -> None:
+    import subprocess
+    import os
+    import sys
+    env = dict(os.environ)
+    env["PLMUX_HOOK_NAME"] = ctx.hook_name
+    if ctx.pane_index >= 0:
+        env["PLMUX_PANE_INDEX"] = str(ctx.pane_index)
+    if ctx.session_index >= 0:
+        env["PLMUX_SESSION_INDEX"] = str(ctx.session_index)
+    if ctx.cwd:
+        env["PLMUX_CWD"] = ctx.cwd
+    kwargs: dict = dict(
+        shell=True,
+        env=env,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    if sys.platform == "win32":
+        kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+    subprocess.Popen(cmd, **kwargs)
 
 
 def register_command(name: str, fn: Callable) -> None:

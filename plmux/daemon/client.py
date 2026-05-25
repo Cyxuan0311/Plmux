@@ -1,11 +1,12 @@
-"""Daemon client: connect, health check, and kill operations."""
+"""Daemon client: connect, health check, kill, and IPC attach operations."""
 
 from __future__ import annotations
 
+import asyncio
 import os
 import socket
 import struct
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 from plmux.daemon.state import ServerState, deserialize_state
 from plmux.daemon.transport import (
@@ -18,6 +19,7 @@ from plmux.daemon.transport import (
     remove_pid_file,
     recv_fds,
 )
+from plmux.ipc.client_conn import ServerConnection
 
 
 def is_server_alive() -> bool:
@@ -73,7 +75,35 @@ def kill_server() -> bool:
         return False
 
 
+def connect_ipc() -> Tuple[socket.socket, asyncio.AbstractEventLoop]:
+    """Connect to the daemon server and return (socket, event_loop)."""
+    loop = asyncio.get_event_loop()
+
+    if is_windows():
+        port = read_port_file()
+        if port is None:
+            raise ConnectionError("No plmux server port found")
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(5.0)
+        sock.connect(("127.0.0.1", port))
+    else:
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.connect(socket_path())
+
+    sock.setblocking(False)
+    return sock, loop
+
+
+async def attach_to_server() -> Tuple[ServerConnection, dict]:
+    """Connect to the daemon and receive INIT data. Returns (conn, init_data)."""
+    sock, loop = connect_ipc()
+    conn = ServerConnection(sock, loop)
+    init_data = await conn.recv_init()
+    return conn, init_data
+
+
 async def connect_and_receive() -> Tuple[ServerState, List[int]]:
+    """Legacy: connect and receive full state for backward compatibility."""
     if is_windows():
         return await _connect_and_receive_windows()
 
