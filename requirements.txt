@@ -9,4 +9,4 @@ pywinpty>=3,<4; sys_platform == "win32"
 
 # Development / Testing
 pytest>=7,<9
-pytest-asyncio>=0.21,<1
+pytest-asyncio>=0.21,<2

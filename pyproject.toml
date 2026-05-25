@@ -17,7 +17,7 @@ dependencies = [
 [project.optional-dependencies]
 windows = ["pywinpty>=3,<4"]
 speed = ["uvloop>=0.19,<1"]
-dev = ["pytest>=7,<9", "pytest-asyncio>=0.21,<1"]
+dev = ["pytest>=7,<9", "pytest-asyncio>=0.21,<2"]
 
 [project.scripts]
 plmux = "plmux.app:run"
