@@ -281,7 +281,7 @@ def _build_overlay_msg(ws: Any, ctx: Any) -> dict[str, Any] | None:
         panel = build_layout_list_overlay(
             ws.theme,
             cursor=getattr(ctx, "layout_list_cursor", 0),
-            current_panes=len(ws.sessions),
+            current_panes=len(ws._window().panes),
             terminal_width=80,
             terminal_height=24,
         )
@@ -325,7 +325,7 @@ async def start_web_server(
 
 def _install_output_hook(workspace: Any) -> None:
     try:
-        for i, session in enumerate(workspace.sessions):
+        for i, session in enumerate(workspace.all_panes()):
             _attach_pane_hook(i, session)
     except Exception:
         pass
@@ -361,11 +361,13 @@ async def _broadcast_loop(server: WebClientServer, ws: Any) -> None:
     _hooked_sessions: set[int] = set()
     while True:
         try:
-            if server._clients and ws.sessions:
+            if server._clients and ws._window().panes:
                 from plmux.extensions.registry import get_plugin_status_items
                 from datetime import datetime
+                win = ws._window()
+                all_sessions = ws.all_panes()
 
-                for i, s in enumerate(ws.sessions):
+                for i, s in enumerate(all_sessions):
                     if id(s) not in _hooked_sessions:
                         _hooked_sessions.add(id(s))
                         _attach_pane_hook(i, s)
@@ -382,7 +384,7 @@ async def _broadcast_loop(server: WebClientServer, ws: Any) -> None:
 
                 dead_ids = set()
                 alive_ids = set()
-                for s in ws.sessions:
+                for s in all_sessions:
                     alive_ids.add(id(s))
                 for sid in list(_hooked_sessions):
                     if sid not in alive_ids:
@@ -395,7 +397,7 @@ async def _broadcast_loop(server: WebClientServer, ws: Any) -> None:
                     theme_colors = _theme_to_colors(theme)
                     await server.broadcast("theme", theme_colors)
 
-                layout_sig = f"{ws.tree}|{ws.focus_pane}|{len(ws.sessions)}"
+                layout_sig = f"{ws.tree}|{win.focus_pane}|{len(win.panes)}"
                 if layout_sig != _last_layout_sig:
                     _last_layout_sig = layout_sig
                     layout_msg = _build_layout_msg(ws)
@@ -422,13 +424,13 @@ async def _broadcast_loop(server: WebClientServer, ws: Any) -> None:
                         right_items.append({"text": display, "style": style_key})
 
                 current_cmd = ""
-                if ws.focus_pane < len(ws.sessions):
-                    current_cmd = ws.sessions[ws.focus_pane].current_command
+                if win.focus_pane < len(win.panes):
+                    current_cmd = win.panes[win.focus_pane].current_command
 
                 status_data = {
                     "mode": current_mode,
                     "win": f"W{ws.current_window + 1}",
-                    "pane": f"P{ws.focus_pane + 1}/{len(ws.sessions)}",
+                    "pane": f"P{win.focus_pane + 1}/{len(win.panes)}",
                     "cmd": current_cmd,
                     "clock": datetime.now().strftime("%H:%M:%S"),
                     "host": "plmux",
@@ -494,7 +496,7 @@ def notify_web_state_change(ctx: Any) -> None:
             _last_overlay_kind = ""
             _last_overlay_sig = ""
 
-    layout_sig = f"{ws.tree}|{ws.focus_pane}|{len(ws.sessions)}"
+    layout_sig = f"{ws.tree}|{ws.focus_pane}|{len(ws._window().panes)}"
     if layout_sig != _last_layout_sig:
         _last_layout_sig = layout_sig
         layout_msg = _build_layout_msg(ws)

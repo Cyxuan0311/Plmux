@@ -1,8 +1,17 @@
-"""Pane tree + PTY sessions (resize, split, focus, windows, layouts)."""
+"""Pane tree + PTY sessions (resize, split, focus, windows, layouts).
+
+Architecture (tmux-aligned):
+  TmuxServer  →  Session  →  Window  →  Pane (TerminalSession)
+
+Each Window owns its own list of TerminalSession objects (``panes``).
+Tree leaf indices are *window-local* — they index into ``window.panes``,
+not a global pool.  This means closing a pane in one window never requires
+re-indexing another window's tree.
+"""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import os
 import sys
 from pathlib import Path
@@ -21,34 +30,24 @@ from plmux.ui.geometry import (
     reindex_after_remove,
     remove_pane_collapse,
     replace_pane,
+    rotate_leaves,
 )
 from plmux.ui.theme import Theme
 from plmux.extensions.registry import ExtensionContext, emit_hook
-
-
-def _reindex_tree(tree: Tree, removed_indices: list[int]) -> Tree:
-    if not removed_indices:
-        return tree
-    removed_set = set(removed_indices)
-    all_idx = pane_indices(tree)
-    max_idx = max(max(all_idx), max(removed_set)) if all_idx else 0
-    mapping: dict[int, int] = {}
-    shift = 0
-    for i in range(max_idx + 2):
-        if i in removed_set:
-            shift += 1
-        else:
-            mapping[i] = i - shift
-    if isinstance(tree, int):
-        return mapping.get(tree, tree)
-    d, r, a, b = tree
-    return (d, r, _reindex_tree(a, removed_indices), _reindex_tree(b, removed_indices))
+from plmux.buffer.manager import BufferManager
 
 
 @dataclass
 class Window:
     tree: Tree = 0
     focus_pane: int = 0
+    name: str = ""
+    panes: List[TerminalSession] = field(default_factory=list)
+
+    def pane(self, idx: int) -> Optional[TerminalSession]:
+        if 0 <= idx < len(self.panes):
+            return self.panes[idx]
+        return None
 
 
 LAYOUT_CYCLE = [
@@ -192,56 +191,58 @@ LAYOUT_TEMPLATES: list[LayoutTemplate] = [
 ]
 
 
-class PaneWorkspace:
-    """Holds windows (each with a split tree) and one TerminalSession per leaf."""
+class Session:
+    """A tmux session: owns windows, each window owns panes."""
 
     def __init__(
         self,
         cfg: PlmuxConfig,
         theme: Theme,
+        mark: Callable[[], None],
+        make_session: Callable,
         *,
-        on_dirty: Optional[Callable[[], None]] = None,
+        name: str = "",
         restore: Optional[SessionSnapshot] = None,
     ) -> None:
         self.cfg = cfg
         self.theme = theme
-        self._on_dirty = on_dirty
-
-        def mark() -> None:
-            if self._on_dirty:
-                self._on_dirty()
-
         self._mark = mark
-        self.sessions: List[TerminalSession] = []
+        self._make_session = make_session
+        self.name: str = name
+        self.env: Dict[str, str] = dict(cfg.env)
         self.windows: List[Window] = []
-        self.current_window = 0
-        self.web_mode: str = "normal"
-        self.web_cmd_buffer: str = ""
-        # zoom state (temporary view of a single pane)
+        self.current_window: int = 0
         self.zoom_pane: int | None = None
-        self._zoomed = False
+        self._zoomed: bool = False
         self._zoom_prev_tree: Tree | None = None
         self._zoom_prev_focus: int | None = None
 
-        snap = restore
-        if snap:
-            tree = tree_from_json(snap.tree)
+        if restore:
+            tree = tree_from_json(restore.tree)
             n = count_panes(tree)
-            shell = snap.shell if snap.shell is not None else cfg.shell
+            shell = restore.shell if restore.shell is not None else cfg.shell
+            panes: List[TerminalSession] = []
             for _ in range(n):
-                self._append_session(24, 80, shell=shell, env=cfg.env)
-            self.windows.append(Window(tree=tree, focus_pane=max(0, min(snap.focus_pane, n - 1))))
-            if snap.buffer_dumps:
-                for key, encoded in snap.buffer_dumps.items():
+                panes.append(make_session(24, 80, shell=shell, env=cfg.env))
+            if restore.buffer_dumps:
+                for key, encoded in restore.buffer_dumps.items():
                     try:
                         idx = int(key)
                     except (ValueError, TypeError):
                         continue
-                    if 0 <= idx < len(self.sessions):
-                        self.sessions[idx].restore_buffer(encoded)
+                    if 0 <= idx < len(panes):
+                        panes[idx].restore_buffer(encoded)
+            self.windows.append(Window(tree=tree, focus_pane=max(0, min(restore.focus_pane, n - 1)), panes=panes))
         else:
-            self._append_session(24, 80, shell=cfg.shell, env=cfg.env)
-            self.windows.append(Window(tree=0, focus_pane=0))
+            pane0 = make_session(24, 80, shell=cfg.shell, env=cfg.env)
+            self.windows.append(Window(tree=0, focus_pane=0, panes=[pane0]))
+
+    @property
+    def sessions(self) -> List[TerminalSession]:
+        out: List[TerminalSession] = []
+        for w in self.windows:
+            out.extend(w.panes)
+        return out
 
     @property
     def tree(self) -> Tree:
@@ -262,103 +263,57 @@ class PaneWorkspace:
     def _window(self) -> Window:
         return self.windows[self.current_window]
 
-    def _append_session(
-        self,
-        rows: int,
-        cols: int,
-        *,
-        shell: Optional[list[str]] = None,
-        env: Optional[dict] = None,
-    ) -> int:
-        idx = len(self.sessions)
-        self.sessions.append(
-            TerminalSession(
-                rows,
-                cols,
-                shell=shell if shell is not None else self.cfg.shell,
-                env=env if env is not None else self.cfg.env,
-                on_update=self._mark,
-                scrollback_lines=self.cfg.ui.scrollback_lines,
-            )
-        )
-        return idx
-
     def split(self, direction: str) -> None:
-        new_idx = self._append_session(
-            24,
-            80,
-            shell=self.cfg.shell,
-            env=self.cfg.env,
-        )
+        win = self._window()
+        new_session = self._make_session(24, 80, shell=self.cfg.shell, env=self.env)
+        new_idx = len(win.panes)
+        win.panes.append(new_session)
         sub: Tree = (direction, 0.5, self.focus_pane, new_idx)
-        self.tree = replace_pane(self.tree, self.focus_pane, sub)
-        self.focus_pane = new_idx
+        win.tree = replace_pane(win.tree, self.focus_pane, sub)
+        win.focus_pane = new_idx
         self._mark()
         emit_hook("pane_created", ExtensionContext(hook_name="pane_created", pane_index=new_idx))
 
     def resize_pane(self, direction: str) -> None:
-        new_tree = adjust_ratio(self.tree, self.focus_pane, direction)
+        win = self._window()
+        new_tree = adjust_ratio(win.tree, win.focus_pane, direction)
         if new_tree is not None:
-            self.tree = new_tree
+            win.tree = new_tree
             self._mark()
 
     def only_pane(self) -> None:
         win = self._window()
         indices = pane_indices(win.tree)
-        keep_idx = self.focus_pane
+        keep_idx = win.focus_pane
+        keep_session = win.panes[keep_idx] if 0 <= keep_idx < len(win.panes) else None
         for idx in sorted(indices, reverse=True):
             if idx != keep_idx:
                 emit_hook("pane_closed", ExtensionContext(hook_name="pane_closed", pane_index=idx))
-                self.sessions[idx].close()
-                del self.sessions[idx]
-        for removed in sorted([i for i in indices if i != keep_idx], reverse=True):
-            for w in self.windows:
-                w.tree = reindex_after_remove(w.tree, removed)
-                w.focus_pane = max(0, min(w.focus_pane, count_panes(w.tree) - 1))
+                if 0 <= idx < len(win.panes):
+                    win.panes[idx].close()
+        win.panes = [keep_session] if keep_session else []
         win.tree = 0
         win.focus_pane = 0
         self._mark()
 
     def remove_pane(self, idx: int) -> bool:
-        if idx < 0 or idx >= len(self.sessions):
+        win = self._window()
+        if idx < 0 or idx >= len(win.panes):
             return True
 
         emit_hook("pane_closed", ExtensionContext(hook_name="pane_closed", pane_index=idx))
 
-        owner_window = None
-        for wi, w in enumerate(self.windows):
-            if idx in pane_indices(w.tree):
-                owner_window = wi
-                break
-
-        if owner_window is None:
-            if len(self.sessions) <= 1:
-                self.sessions[idx].close()
-                self.sessions = []
-                self.tree = 0
-                self.focus_pane = 0
-                self._mark()
-                return False
-            self.sessions[idx].close()
-            del self.sessions[idx]
-            for w in self.windows:
-                w.tree = reindex_after_remove(w.tree, idx)
-                w.focus_pane = max(0, min(w.focus_pane, count_panes(w.tree) - 1))
-            self._mark()
-            return True
-
-        if len(self.sessions) <= 1:
-            self.sessions[idx].close()
-            self.sessions = []
-            self.tree = 0
-            self.focus_pane = 0
+        if len(win.panes) <= 1:
+            win.panes[idx].close()
+            win.panes = []
+            win.tree = 0
+            win.focus_pane = 0
             self._mark()
             return False
 
-        self.sessions[idx].close()
-        del self.sessions[idx]
+        win.panes[idx].close()
+        del win.panes[idx]
 
-        win = self.windows[owner_window]
         new_tree = remove_pane_collapse(win.tree, idx)
         if new_tree is None:
             win.tree = 0
@@ -371,46 +326,41 @@ class PaneWorkspace:
             win.focus_pane = order[0] if order else 0
         win.focus_pane = max(0, min(win.focus_pane, count_panes(win.tree) - 1))
 
-        for i, w in enumerate(self.windows):
-            if i != owner_window:
-                w.tree = reindex_after_remove(w.tree, idx)
-                w.focus_pane = max(0, min(w.focus_pane, count_panes(w.tree) - 1))
-
         self._mark()
         return True
 
     def focus_next(self) -> None:
-        order = pane_indices(self.tree)
+        win = self._window()
+        order = pane_indices(win.tree)
         if len(order) <= 1:
             return
-        if self.focus_pane not in order:
-            self.focus_pane = order[0]
+        if win.focus_pane not in order:
+            win.focus_pane = order[0]
             return
-        pos = order.index(self.focus_pane)
-        self.focus_pane = order[(pos + 1) % len(order)]
+        pos = order.index(win.focus_pane)
+        win.focus_pane = order[(pos + 1) % len(order)]
         self._mark()
 
     def focus_prev(self) -> None:
-        order = pane_indices(self.tree)
+        win = self._window()
+        order = pane_indices(win.tree)
         if len(order) <= 1:
             return
-        if self.focus_pane not in order:
-            self.focus_pane = order[0]
+        if win.focus_pane not in order:
+            win.focus_pane = order[0]
             return
-        pos = order.index(self.focus_pane)
-        self.focus_pane = order[(pos - 1) % len(order)]
+        pos = order.index(win.focus_pane)
+        win.focus_pane = order[(pos - 1) % len(order)]
         self._mark()
 
     def toggle_zoom(self) -> None:
         win = self._window()
-        if not getattr(self, "_zoomed", False):
-            # enter zoom: remember tree and focus, then set zoom_pane
+        if not self._zoomed:
             self._zoom_prev_tree = win.tree
             self._zoom_prev_focus = win.focus_pane
-            self.zoom_pane = self.focus_pane
+            self.zoom_pane = win.focus_pane
             self._zoomed = True
         else:
-            # restore
             if self._zoom_prev_tree is not None:
                 win.tree = self._zoom_prev_tree
             if self._zoom_prev_focus is not None:
@@ -419,29 +369,40 @@ class PaneWorkspace:
             self._zoomed = False
         self._mark()
 
+    def rotate_panes(self, direction: str = "up") -> None:
+        win = self._window()
+        indices = pane_indices(win.tree)
+        if len(indices) <= 1:
+            return
+        win.tree = rotate_leaves(win.tree, direction)
+        self._mark()
+
     def sync_geometry(self, content_rows: int, content_cols: int) -> None:
-        rects = assign_rects(
-            self.tree,
-            0,
-            0,
-            max(self.cfg.ui.min_pane_rows, content_rows),
-            max(self.cfg.ui.min_pane_cols, content_cols),
-        )
+        win = self._window()
+        total_rows = max(self.cfg.ui.min_pane_rows, content_rows)
+        total_cols = max(self.cfg.ui.min_pane_cols, content_cols)
+        rects = assign_rects(win.tree, 0, 0, total_rows, total_cols)
 
         for idx, r in rects.items():
-            if 0 <= idx < len(self.sessions):
-                self.sessions[idx].resize(
-                    max(self.cfg.ui.min_pane_rows, r.rows - 2),
-                    max(self.cfg.ui.min_pane_cols, r.cols - 2),
-                )
+            if 0 <= idx < len(win.panes):
+                new_rows = max(self.cfg.ui.min_pane_rows, r.rows - 2)
+                new_cols = max(self.cfg.ui.min_pane_cols, r.cols - 2)
+                old_rows = win.panes[idx].rows
+                old_cols = win.panes[idx].cols
+                if new_rows != old_rows or new_cols != old_cols:
+                    win.panes[idx].resize(new_rows, new_cols)
 
     def active_session(self) -> TerminalSession:
-        return self.sessions[self.focus_pane]
+        win = self._window()
+        if win.focus_pane < len(win.panes):
+            return win.panes[win.focus_pane]
+        return win.panes[0]
 
     def set_focus_pane(self, n: int) -> bool:
-        if 0 <= n < len(self.sessions):
-            old = self.focus_pane
-            self.focus_pane = n
+        win = self._window()
+        if 0 <= n < len(win.panes):
+            old = win.focus_pane
+            win.focus_pane = n
             self._mark()
             if old != n:
                 emit_hook("pane_focus_changed", ExtensionContext(hook_name="pane_focus_changed", pane_index=n, message=str(old)))
@@ -449,9 +410,10 @@ class PaneWorkspace:
         return False
 
     def pane_title(self, idx: int) -> str:
-        s = self.sessions[idx]
+        win = self._window()
+        s = win.panes[idx]
         cwd = None
-        if sys.platform != "win32" and os.name != "nt":
+        if sys.platform != "win32" and os.name != "nt" and s.proc is not None:
             try:
                 cwd = os.readlink(f"/proc/{s.proc.pid}/cwd")
             except OSError:
@@ -471,35 +433,33 @@ class PaneWorkspace:
         return cwd[:half] + "..." + cwd[-half:]
 
     def shutdown(self) -> None:
-        for s in self.sessions:
-            s.close()
-
-    # ── window management ──────────────────────────────────────────
+        for w in self.windows:
+            for s in w.panes:
+                s.close()
 
     def new_window(self) -> None:
-        new_idx = self._append_session(24, 80, shell=self.cfg.shell, env=self.cfg.env)
-        self.windows.append(Window(tree=new_idx, focus_pane=new_idx))
+        pane0 = self._make_session(24, 80, shell=self.cfg.shell, env=self.env)
+        self.windows.append(Window(tree=0, focus_pane=0, panes=[pane0]))
         self.current_window = len(self.windows) - 1
         self._mark()
-        emit_hook("window_created", ExtensionContext(hook_name="window_created", window_index=self.current_window, pane_index=new_idx))
+        emit_hook("window_created", ExtensionContext(hook_name="window_created", window_index=self.current_window, pane_index=0))
 
     def close_window(self) -> bool:
         if len(self.windows) <= 1:
             return False
         win_idx = self.current_window
+        return self.close_window_by_index(win_idx)
+
+    def close_window_by_index(self, win_idx: int) -> bool:
+        if win_idx < 0 or win_idx >= len(self.windows):
+            return False
+        if len(self.windows) <= 1:
+            return False
         emit_hook("window_closed", ExtensionContext(hook_name="window_closed", window_index=win_idx))
         win = self.windows[win_idx]
-        indices = sorted(pane_indices(win.tree), reverse=True)
-        for idx in indices:
-            if idx < len(self.sessions):
-                self.sessions[idx].close()
-                del self.sessions[idx]
-        for removed in sorted(indices):
-            for i, w in enumerate(self.windows):
-                if i == self.current_window:
-                    continue
-                w.tree = reindex_after_remove(w.tree, removed)
-        del self.windows[self.current_window]
+        for s in win.panes:
+            s.close()
+        del self.windows[win_idx]
         if self.current_window >= len(self.windows):
             self.current_window = len(self.windows) - 1
         self._mark()
@@ -524,10 +484,13 @@ class PaneWorkspace:
             return True
         return False
 
-    # ── layout cycling ─────────────────────────────────────────────
+    def rename_window(self, name: str) -> None:
+        self.windows[self.current_window].name = name
+        self._mark()
 
     def cycle_layout(self) -> None:
-        panes = pane_indices(self.tree)
+        win = self._window()
+        panes = pane_indices(win.tree)
         n = len(panes)
         if n <= 1:
             return
@@ -541,17 +504,30 @@ class PaneWorkspace:
 
         new_tree = self._build_layout(panes, next_name)
         if new_tree is not None:
-            self.tree = new_tree
+            win.tree = new_tree
             self._mark()
 
     def _detect_layout_name(self) -> str:
-        panes = pane_indices(self.tree)
+        win = self._window()
+        panes = pane_indices(win.tree)
         n = len(panes)
         if n <= 1:
             return "even"
-        if isinstance(self.tree, int):
+        if isinstance(win.tree, int):
             return "even"
-        d, r, a, b = self.tree
+
+    def setenv(self, key: str, value: str) -> None:
+        self.env[key] = value
+
+    def unsetenv(self, key: str) -> bool:
+        if key in self.env:
+            del self.env[key]
+            return True
+        return False
+
+    def showenv(self) -> Dict[str, str]:
+        return dict(self.env)
+        d, r, a, b = win.tree
         if d == "row" and abs(r - 0.5) < 0.05:
             return "even"
         if d == "row" and r > 0.5:
@@ -610,43 +586,32 @@ class PaneWorkspace:
         if tpl is None:
             return False
 
-        current_indices = pane_indices(self.tree)
+        win = self._window()
+        current_indices = pane_indices(win.tree)
         current_n = len(current_indices)
         needed = tpl.min_panes
 
         while current_n < needed:
-            self._append_session(24, 80, shell=self.cfg.shell, env=self.cfg.env)
-            current_n = len(self.sessions)
+            win.panes.append(self._make_session(24, 80, shell=self.cfg.shell, env=self.env))
+            current_n = len(win.panes)
 
         all_indices = list(range(current_n))
         new_tree = self._build_template_tree(all_indices, template_name)
         if new_tree is None:
             return False
 
-        used_indices = pane_indices(new_tree)
+        used_indices = set(pane_indices(new_tree))
         unused = sorted([i for i in all_indices if i not in used_indices], reverse=True)
         for idx in unused:
-            if idx < len(self.sessions):
-                self.sessions[idx].close()
+            if 0 <= idx < len(win.panes):
+                win.panes[idx].close()
                 emit_hook("pane_closed", ExtensionContext(hook_name="pane_closed", pane_index=idx))
         if unused:
-            self.sessions = [s for i, s in enumerate(self.sessions) if i not in set(unused)]
+            win.panes = [s for i, s in enumerate(win.panes) if i not in set(unused)]
             new_tree = _reindex_tree(new_tree, unused)
 
-        for i in range(len(self.windows)):
-            if i == self.current_window:
-                self.windows[i].tree = new_tree
-                self.windows[i].focus_pane = 0
-            else:
-                w_indices = pane_indices(self.windows[i].tree)
-                target_n = len(used_indices)
-                if len(w_indices) > target_n:
-                    for removed in sorted([idx for idx in w_indices if idx >= target_n], reverse=True):
-                        self.windows[i].tree = reindex_after_remove(self.windows[i].tree, removed)
-                elif len(w_indices) < target_n:
-                    self.windows[i].tree = self._build_template_tree(list(range(len(w_indices))), template_name) or self.windows[i].tree
-                self.windows[i].focus_pane = max(0, min(self.windows[i].focus_pane, target_n - 1))
-
+        win.tree = new_tree
+        win.focus_pane = 0
         self._mark()
         return True
 
@@ -747,6 +712,315 @@ class PaneWorkspace:
         bot_right = self._build_even_horizontal(panes[2:]) if len(panes) > 3 else panes[2]
         bottom = ("row", 0.5, bot_left, bot_right)
         return ("col", 0.6, main, bottom)
+
+
+class TmuxServer:
+    """Top-level server: manages multiple sessions.
+
+    Delegates window/pane operations to the current session so that
+    ``ctx.ws`` continues to work as before (``ws.split()``, ``ws.tree``,
+    ``ws.focus_pane``, etc.).
+    """
+
+    def __init__(
+        self,
+        cfg: PlmuxConfig,
+        theme: Theme,
+        *,
+        on_dirty: Optional[Callable[[], None]] = None,
+        restore: Optional[SessionSnapshot] = None,
+    ) -> None:
+        self.cfg = cfg
+        self.theme = theme
+        self._on_dirty = on_dirty
+
+        def mark() -> None:
+            if self._on_dirty:
+                self._on_dirty()
+
+        self._mark = mark
+        self.sessions_list: List[Session] = []
+        self.current_session: int = 0
+        self.web_mode: str = "normal"
+        self.web_cmd_buffer: str = ""
+        self.buffers: BufferManager = BufferManager()
+
+        if restore and restore.sessions_data:
+            for sd in restore.sessions_data:
+                from plmux.session.models import SessionSnapshot
+                win_data = sd.get("windows", [])
+                if win_data:
+                    first_win = win_data[0]
+                    snap = SessionSnapshot(
+                        tree=first_win.get("tree", 0),
+                        focus_pane=first_win.get("focus_pane", 0),
+                        buffer_dumps=restore.buffer_dumps,
+                    )
+                else:
+                    snap = None
+                sess = Session(cfg, theme, mark, self._make_session, name=sd.get("name", ""), restore=snap)
+                if win_data and len(win_data) > 1:
+                    for w_data in win_data[1:]:
+                        w_tree = tree_from_json(w_data.get("tree", 0))
+                        n_panes = count_panes(w_tree)
+                        w_panes = [self._make_session(24, 80, shell=cfg.shell, env=cfg.env) for _ in range(n_panes)]
+                        if restore.buffer_dumps:
+                            for key, encoded in restore.buffer_dumps.items():
+                                try:
+                                    bidx = int(key)
+                                except (ValueError, TypeError):
+                                    continue
+                                if 0 <= bidx < len(w_panes):
+                                    w_panes[bidx].restore_buffer(encoded)
+                        sess.windows.append(Window(tree=w_tree, focus_pane=max(0, min(w_data.get("focus_pane", 0), n_panes - 1)), panes=w_panes))
+                sess.current_window = sd.get("current_window", 0)
+                self.sessions_list.append(sess)
+            self.current_session = min(restore.current_session, len(self.sessions_list) - 1)
+        else:
+            sess = Session(cfg, theme, mark, self._make_session, restore=restore)
+            self.sessions_list.append(sess)
+
+    def _make_session(
+        self,
+        rows: int,
+        cols: int,
+        *,
+        shell: Optional[list[str]] = None,
+        env: Optional[dict] = None,
+    ) -> TerminalSession:
+        return TerminalSession(
+            rows,
+            cols,
+            shell=shell if shell is not None else self.cfg.shell,
+            env=env if env is not None else self.cfg.env,
+            on_update=self._mark,
+            scrollback_lines=self.cfg.ui.scrollback_lines,
+        )
+
+    # ── current session access ─────────────────────────────────────
+
+    def _session(self) -> Session:
+        return self.sessions_list[self.current_session]
+
+    # ── delegated properties (current session) ─────────────────────
+
+    @property
+    def windows(self) -> List[Window]:
+        return self._session().windows
+
+    @windows.setter
+    def windows(self, value: List[Window]) -> None:
+        self._session().windows = value
+
+    @property
+    def current_window(self) -> int:
+        return self._session().current_window
+
+    @current_window.setter
+    def current_window(self, value: int) -> None:
+        self._session().current_window = value
+
+    @property
+    def session_name(self) -> str:
+        return self._session().name
+
+    @session_name.setter
+    def session_name(self, value: str) -> None:
+        self._session().name = value
+
+    @property
+    def sessions(self) -> List[TerminalSession]:
+        return self._session().sessions
+
+    @property
+    def tree(self) -> Tree:
+        return self._session().tree
+
+    @tree.setter
+    def tree(self, value: Tree) -> None:
+        self._session().tree = value
+
+    @property
+    def focus_pane(self) -> int:
+        return self._session().focus_pane
+
+    @focus_pane.setter
+    def focus_pane(self, value: int) -> None:
+        self._session().focus_pane = value
+
+    @property
+    def zoom_pane(self) -> int | None:
+        return self._session().zoom_pane
+
+    @zoom_pane.setter
+    def zoom_pane(self, value: int | None) -> None:
+        self._session().zoom_pane = value
+
+    def _window(self) -> Window:
+        return self._session()._window()
+
+    # ── delegated methods (current session) ────────────────────────
+
+    def split(self, direction: str) -> None:
+        self._session().split(direction)
+
+    def resize_pane(self, direction: str) -> None:
+        self._session().resize_pane(direction)
+
+    def only_pane(self) -> None:
+        self._session().only_pane()
+
+    def remove_pane(self, idx: int) -> bool:
+        return self._session().remove_pane(idx)
+
+    def focus_next(self) -> None:
+        self._session().focus_next()
+
+    def focus_prev(self) -> None:
+        self._session().focus_prev()
+
+    def toggle_zoom(self) -> None:
+        self._session().toggle_zoom()
+
+    def rotate_panes(self, direction: str = "up") -> None:
+        self._session().rotate_panes(direction)
+
+    def sync_geometry(self, content_rows: int, content_cols: int) -> None:
+        self._session().sync_geometry(content_rows, content_cols)
+
+    def active_session(self) -> TerminalSession:
+        return self._session().active_session()
+
+    def set_focus_pane(self, n: int) -> bool:
+        return self._session().set_focus_pane(n)
+
+    def pane_title(self, idx: int) -> str:
+        return self._session().pane_title(idx)
+
+    def setenv(self, key: str, value: str) -> None:
+        self._session().setenv(key, value)
+
+    def unsetenv(self, key: str) -> bool:
+        return self._session().unsetenv(key)
+
+    def showenv(self) -> Dict[str, str]:
+        return self._session().showenv()
+
+    def new_window(self) -> None:
+        self._session().new_window()
+
+    def close_window(self) -> bool:
+        return self._session().close_window()
+
+    def close_window_by_index(self, win_idx: int) -> bool:
+        return self._session().close_window_by_index(win_idx)
+
+    def next_window(self) -> None:
+        self._session().next_window()
+
+    def prev_window(self) -> None:
+        self._session().prev_window()
+
+    def goto_window(self, n: int) -> bool:
+        return self._session().goto_window(n)
+
+    def rename_window(self, name: str) -> None:
+        self._session().rename_window(name)
+
+    def cycle_layout(self) -> None:
+        self._session().cycle_layout()
+
+    def apply_layout_template(self, template_name: str) -> bool:
+        return self._session().apply_layout_template(template_name)
+
+    def shutdown(self) -> None:
+        for sess in self.sessions_list:
+            sess.shutdown()
+
+    # ── session management ─────────────────────────────────────────
+
+    def new_session(self, name: str = "") -> Session:
+        sess = Session(self.cfg, self.theme, self._mark, self._make_session, name=name)
+        self.sessions_list.append(sess)
+        self.current_session = len(self.sessions_list) - 1
+        self._mark()
+        emit_hook("session_created", ExtensionContext(hook_name="session_created", session_index=self.current_session))
+        return sess
+
+    def kill_session(self, idx: int | None = None) -> bool:
+        if len(self.sessions_list) <= 1:
+            return False
+        if idx is None:
+            idx = self.current_session
+        if idx < 0 or idx >= len(self.sessions_list):
+            return False
+        emit_hook("session_killed", ExtensionContext(hook_name="session_killed", session_index=idx))
+        self.sessions_list[idx].shutdown()
+        del self.sessions_list[idx]
+        if self.current_session >= len(self.sessions_list):
+            self.current_session = len(self.sessions_list) - 1
+        self._mark()
+        return True
+
+    def switch_session(self, idx: int) -> bool:
+        if 0 <= idx < len(self.sessions_list):
+            self.current_session = idx
+            self._mark()
+            return True
+        return False
+
+    def next_session(self) -> None:
+        if len(self.sessions_list) <= 1:
+            return
+        self.current_session = (self.current_session + 1) % len(self.sessions_list)
+        self._mark()
+
+    def prev_session(self) -> None:
+        if len(self.sessions_list) <= 1:
+            return
+        self.current_session = (self.current_session - 1) % len(self.sessions_list)
+        self._mark()
+
+    def rename_session(self, name: str) -> None:
+        self._session().name = name
+        self._mark()
+
+    def find_session(self, name: str) -> int:
+        for i, s in enumerate(self.sessions_list):
+            if s.name == name:
+                return i
+        return -1
+
+    def all_sessions(self) -> List[Session]:
+        return self.sessions_list
+
+    def all_panes(self) -> List[TerminalSession]:
+        out: List[TerminalSession] = []
+        for sess in self.sessions_list:
+            out.extend(sess.sessions)
+        return out
+
+
+PaneWorkspace = TmuxServer
+
+
+def _reindex_tree(tree: Tree, removed_indices: list[int]) -> Tree:
+    if not removed_indices:
+        return tree
+    removed_set = set(removed_indices)
+    all_idx = pane_indices(tree)
+    max_idx = max(max(all_idx), max(removed_set)) if all_idx else 0
+    mapping: dict[int, int] = {}
+    shift = 0
+    for i in range(max_idx + 2):
+        if i in removed_set:
+            shift += 1
+        else:
+            mapping[i] = i - shift
+    if isinstance(tree, int):
+        return mapping.get(tree, tree)
+    d, r, a, b = tree
+    return (d, r, _reindex_tree(a, removed_indices), _reindex_tree(b, removed_indices))
 
 
 def try_load_snapshot(cfg: PlmuxConfig) -> SessionSnapshot | None:

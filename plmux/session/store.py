@@ -26,6 +26,8 @@ def save_session(
     cwd: str | None,
     extra_meta: Dict[str, Any] | None = None,
     buffer_dumps: Dict[str, str] | None = None,
+    sessions_data: list[dict] | None = None,
+    current_session: int = 0,
 ) -> None:
     if not cfg.session.auto_save:
         return
@@ -38,6 +40,8 @@ def save_session(
         cwd=cwd,
         meta=dict(extra_meta or {}),
         buffer_dumps=dict(buffer_dumps) if buffer_dumps else None,
+        sessions_data=sessions_data or [],
+        current_session=current_session,
     )
     tmp = path.with_suffix(".tmp")
     with open(tmp, "w", encoding="utf-8") as f:
@@ -52,7 +56,4 @@ def load_session(cfg: PlmuxConfig) -> SessionSnapshot | None:
     with open(path, encoding="utf-8") as f:
         data = json.load(f)
     snap = SessionSnapshot.from_json(data)
-    if snap.version != 1:
-        # Future: migrate based on version
-        pass
     return snap

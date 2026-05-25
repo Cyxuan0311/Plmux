@@ -9,14 +9,32 @@ Tree = Union[int, List[Any]]
 
 
 @dataclass
+class WindowSnapshot:
+    tree: Tree = 0
+    focus_pane: int = 0
+    name: str = ""
+
+
+@dataclass
+class SessionData:
+    name: str = ""
+    windows: List[Dict[str, Any]] = field(default_factory=list)
+    current_window: int = 0
+    pane_offset: int = 0
+    pane_count: int = 0
+
+
+@dataclass
 class SessionSnapshot:
-    version: int = 1
+    version: int = 2
     tree: Tree = 0
     focus_pane: int = 0
     shell: Optional[List[str]] = None
     cwd: Optional[str] = None
     meta: Dict[str, Any] = field(default_factory=dict)
     buffer_dumps: Optional[Dict[str, str]] = None
+    sessions_data: List[Dict[str, Any]] = field(default_factory=list)
+    current_session: int = 0
 
     def to_json(self) -> Dict[str, Any]:
         d = asdict(self)
@@ -25,13 +43,15 @@ class SessionSnapshot:
     @staticmethod
     def from_json(d: Dict[str, Any]) -> "SessionSnapshot":
         return SessionSnapshot(
-            version=int(d.get("version", 1)),
+            version=int(d.get("version", 2)),
             tree=d.get("tree", 0),
             focus_pane=int(d.get("focus_pane", 0)),
             shell=d.get("shell"),
             cwd=d.get("cwd"),
             meta=dict(d.get("meta") or {}),
             buffer_dumps=dict(d.get("buffer_dumps") or {}),
+            sessions_data=d.get("sessions_data", []),
+            current_session=int(d.get("current_session", 0)),
         )
 
 
