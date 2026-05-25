@@ -55,6 +55,30 @@ def reindex_after_remove(tree: Tree, removed_idx: int) -> Tree:
     return (d, r, reindex_after_remove(a, removed_idx), reindex_after_remove(b, removed_idx))
 
 
+def rotate_leaves(tree: Tree, direction: str = "up") -> Tree:
+    """Rotate pane indices within the tree layout (structure unchanged).
+
+    direction="up":   [0,1,2,3] -> [1,2,3,0]  (first leaf moves to last)
+    direction="down": [0,1,2,3] -> [3,0,1,2]  (last leaf moves to first)
+    """
+    indices = pane_indices(tree)
+    if len(indices) <= 1:
+        return tree
+    if direction == "up":
+        shifted = indices[1:] + [indices[0]]
+    else:
+        shifted = [indices[-1]] + indices[:-1]
+    mapping = dict(zip(indices, shifted))
+
+    def _remap(t: Tree) -> Tree:
+        if isinstance(t, int):
+            return mapping.get(t, t)
+        d, r, a, b = t
+        return (d, r, _remap(a), _remap(b))
+
+    return _remap(tree)
+
+
 def adjust_ratio(tree: Tree, pane_idx: int, direction: str, delta: float = 0.05) -> Tree | None:
     """Adjust the split ratio for the ancestor node that controls `direction` for `pane_idx`.
     Returns new tree or None if no applicable ancestor found."""

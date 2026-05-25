@@ -389,6 +389,7 @@ FastScreen_render_row_runs_to_text(FastScreenObject *self, PyObject *args) {
     }
 
     free(run_buf);
+
     return text_obj;
 }
 
@@ -549,6 +550,7 @@ FastScreen_render_row_to_ansi(FastScreenObject *self, PyObject *args) {
 
     PyObject *result = PyUnicode_FromStringAndSize(buf, pos);
     free(buf);
+
     return result;
 }
 
@@ -639,6 +641,7 @@ FastStream_feed(FastStreamObject *self, PyObject *data_obj) {
     Py_ssize_t len;
     if (PyBytes_AsStringAndSize(data_obj, &buf, &len) < 0) return NULL;
     parser_feed(&self->parser, (const uint8_t *)buf, len);
+
     Py_RETURN_NONE;
 }
 

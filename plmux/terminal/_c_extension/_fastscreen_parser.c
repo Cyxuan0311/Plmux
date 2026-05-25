@@ -1,24 +1,4 @@
 #include "_fastscreen_types.h"
-#include "_fastscreen_debug.h"
-
-FsPerfStats _feed_stats;
-FsPerfStats _csi_stats;
-FsPerfStats _ground_stats;
-FsPerfStats _esc_stats;
-FsPerfStats _putchar_stats;
-static int _stats_inited = 0;
-
-static void
-_ensure_stats(void) {
-    if (!_stats_inited) {
-        fs_stats_init(&_feed_stats, "cparser.feed");
-        fs_stats_init(&_csi_stats, "cparser.csi_dispatch");
-        fs_stats_init(&_ground_stats, "cparser.ground");
-        fs_stats_init(&_esc_stats, "cparser.esc");
-        fs_stats_init(&_putchar_stats, "cparser.put_char");
-        _stats_inited = 1;
-    }
-}
 
 int
 utf8_feed(Utf8Decoder *d, uint8_t b, uint32_t *cp) {
@@ -110,9 +90,6 @@ void
 parser_dispatch_csi(FastParser *p, int cmd) {
     FastScreen *s = p->screen;
     int pm = p->private_marker;
-
-    FsPerfTimer _csi_t;
-    if (fs_debug_enabled()) fs_timer_start(&_csi_t);
 
     switch (cmd) {
     case 'A': {
@@ -366,10 +343,16 @@ parser_dispatch_csi(FastParser *p, int cmd) {
                 if (v == 1) { /* DECCKM */ }
                 else if (v == 3) { /* DECCOLM */ }
                 else if (v == 5) { /* DECSCNM */ }
-                else if (v == 6) s->origin_mode = set;
-                else if (v == 7) s->auto_wrap = set;
+                else if (v == 6) {
+                    s->origin_mode = set;
+                }
+                else if (v == 7) {
+                    s->auto_wrap = set;
+                }
                 else if (v == 12) { /* att610 */ }
-                else if (v == 25) s->cursor_visible = set;
+                else if (v == 25) {
+                    s->cursor_visible = set;
+                }
                 else if (v == 1000) { s->mouse_mode = set ? 1 : 0; }
                 else if (v == 1002) { s->mouse_mode = set ? 2 : 0; }
                 else if (v == 1003) { s->mouse_mode = set ? 3 : 0; }
@@ -417,18 +400,11 @@ parser_dispatch_csi(FastParser *p, int cmd) {
         break;
     }
 
-    if (fs_debug_enabled()) {
-        double ms = fs_timer_elapsed_ms(&_csi_t);
-        fs_stats_record(&_csi_stats, ms);
-    }
 }
 
 void
 parser_handle_esc(FastParser *p, int c) {
     FastScreen *s = p->screen;
-
-    FsPerfTimer _esc_t;
-    if (fs_debug_enabled()) fs_timer_start(&_esc_t);
 
     switch (c) {
     case '7':
@@ -479,11 +455,6 @@ parser_handle_esc(FastParser *p, int c) {
         break;
     default:
         break;
-    }
-
-    if (fs_debug_enabled()) {
-        double ms = fs_timer_elapsed_ms(&_esc_t);
-        fs_stats_record(&_esc_stats, ms);
     }
 }
 
@@ -777,31 +748,7 @@ parser_feed_byte(FastParser *p, uint8_t b) {
 
 void
 parser_feed(FastParser *p, const uint8_t *data, Py_ssize_t len) {
-    _ensure_stats();
-
-    FsPerfTimer t;
-    if (fs_debug_enabled()) {
-        fs_timer_start(&t);
-        fs_debug_write("C_PARSER feed: len=%zd, cursor=(%d,%d)\n", 
-                       len, p->screen ? p->screen->cursor_x : -1, p->screen ? p->screen->cursor_y : -1);
-    }
-
     for (Py_ssize_t i = 0; i < len; i++) {
         parser_feed_byte(p, data[i]);
-    }
-
-    if (fs_debug_enabled()) {
-        double ms = fs_timer_elapsed_ms(&t);
-        fs_stats_record(&_feed_stats, ms);
-        if (len > 512 && ms > 1.0) {
-            fs_debug_write("C_PERF parser.feed SLOW len=%zd ms=%.3f\n", len, ms);
-        }
-        fs_debug_write("C_PARSER after feed: cursor=(%d,%d)\n",
-                       p->screen ? p->screen->cursor_x : -1, p->screen ? p->screen->cursor_y : -1);
-        fs_stats_report(&_feed_stats, 5.0);
-        fs_stats_report(&_csi_stats, 5.0);
-        fs_stats_report(&_ground_stats, 5.0);
-        fs_stats_report(&_esc_stats, 5.0);
-        fs_stats_report(&_putchar_stats, 5.0);
     }
 }

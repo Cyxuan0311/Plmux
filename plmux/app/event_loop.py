@@ -11,6 +11,7 @@ import threading
 import time
 from datetime import datetime
 from pathlib import Path
+from typing import Callable
 
 from blessed import Terminal
 from rich.console import Console, ConsoleDimensions
@@ -18,9 +19,9 @@ from rich.live import Live
 
 from plmux.config.loader import load_config
 from plmux.daemon import ServerState
-from plmux.debug_log import PerfTimer, get_frame_profiler, setup_debug_logging
+from plmux.debug_log import setup_debug_logging
 from plmux.terminal._c_extension import _fastscreen
-from plmux.extensions.registry import ExtensionContext, emit_hook, load_plugins, get_plugin_status_items, get_plugin_overlay
+from plmux.extensions.registry import ExtensionContext, emit_hook, load_plugins, get_plugin_status_items, get_plugin_overlay, load_config_hooks
 from plmux.modes import AppContext
 from plmux.modes.dispatcher import dispatch_key
 from plmux.session.store import save_session
@@ -29,10 +30,11 @@ from plmux.state_bridge import (
     build_workspace_from_state,
 )
 from plmux.daemon import connect_and_receive
-from plmux.terminal.session import TerminalSession, report_session_stats, reset_session_stats
+from plmux.terminal.session import TerminalSession
 from plmux.ui.renderer import build_root
+from plmux.ui.geometry import remove_pane_collapse, reindex_after_remove
 from plmux.ui.theme import load_theme
-from plmux.workspace import PaneWorkspace, try_load_snapshot
+from plmux.workspace import Session, TmuxServer, Window, try_load_snapshot
 
 
 def _terminal_size(term: Terminal) -> tuple[int, int]:
@@ -104,20 +106,22 @@ class _InputReader:
         while not self._stop.is_set():
             try:
                 if is_win:
-                    import msvcrt
-                    if msvcrt.kbhit():
-                        key = self._term.inkey()
-                        if key:
-                            self._queue.put(key)
-                        continue
-                    self._stop.wait(0.002)
+                    key = self._term.inkey(timeout=0.002)
+                    if key:
+                        raw = str(key)
+                        if raw.startswith("\x1b[<"):
+                            m = SGR_MOUSE_RE.match(raw)
+                            if m:
+                                key = make_mouse_keystroke(raw, m)
+                        self._queue.put(key)
                 else:
                     key = self._term.inkey(timeout=0.016)
                     if key:
-                        if str(key).startswith("\x1b[<"):
-                            m = SGR_MOUSE_RE.match(str(key))
+                        raw = str(key)
+                        if raw.startswith("\x1b[<"):
+                            m = SGR_MOUSE_RE.match(raw)
                             if m:
-                                key = make_mouse_keystroke(str(key), m)
+                                key = make_mouse_keystroke(raw, m)
                         self._queue.put(key)
             except Exception:
                 self._stop.wait(0.005)
@@ -184,6 +188,7 @@ async def async_main(
     *,
     debug: bool = False,
     attach_mode: bool = False,
+    remote_mode: bool = False,
     target_session: str | None = None,
 ) -> ServerState | None:
     cfg = load_config(config_path)
@@ -195,9 +200,6 @@ async def async_main(
         _win_setup_timer()
 
     setup_debug_logging(debug)
-
-    if debug:
-        _fastscreen.enable_debug(str(Path.cwd() / "plmux_cdebug.log"))
 
     ctx = AppContext(
         ws=None,
@@ -219,16 +221,24 @@ async def async_main(
                 ctx.clock_str = new_time
                 ctx.dirty = True
 
+    async def pet_ticker() -> None:
+        while ctx.running:
+            await asyncio.sleep(0.8)
+            if ctx.pet_mode_pane is not None:
+                ctx.pet_frame += 1
+                ctx.dirty = True
+
     async def status_refresh_ticker() -> None:
         while ctx.running:
             await asyncio.sleep(2)
             try:
                 pane_cwd = ""
-                if ctx.ws and ctx.ws.sessions:
-                    fp = ctx.ws.focus_pane
-                    if 0 <= fp < len(ctx.ws.sessions):
-                        s = ctx.ws.sessions[fp]
-                        if sys.platform != "win32" and os.name != "nt":
+                if ctx.ws and ctx.ws._window().panes:
+                    win = ctx.ws._window()
+                    fp = win.focus_pane
+                    if 0 <= fp < len(win.panes):
+                        s = win.panes[fp]
+                        if sys.platform != "win32" and os.name != "nt" and s.proc is not None:
                             try:
                                 pane_cwd = os.readlink(f"/proc/{s.proc.pid}/cwd")
                             except OSError:
@@ -247,23 +257,232 @@ async def async_main(
             except Exception:
                 pass
 
-    if attach_mode:
+    ipc_conn = None
+
+    if remote_mode:
+        from plmux.daemon.client import attach_to_server
+        from plmux.ipc.client_conn import ServerConnection
+        from plmux.platform.shell import resolve_shell_argv
+        from plmux.session.models import tree_from_json
+        from plmux.ui.geometry import count_panes
+
+        ipc_conn, init_data = await attach_to_server()
+        ctx.ws = TmuxServer(cfg, theme, on_dirty=ctx.mark_dirty)
+        ctx.ws.sessions_list.clear()
+        ctx.ws.current_session = init_data.get("current_session", 0)
+
+        def _get_focus_pane_idx() -> int:
+            gi = 0
+            for si, sess in enumerate(ctx.ws.sessions_list):
+                for w in sess.windows:
+                    for pi, s in enumerate(w.panes):
+                        if si == ctx.ws.current_session and w is ctx.ws._session().windows[sess.current_window] and pi == w.focus_pane:
+                            return gi
+                        gi += 1
+            return 0
+
+        def _make_on_write() -> Callable:
+            def on_write(data: bytes) -> None:
+                idx = _get_focus_pane_idx()
+                asyncio.ensure_future(ipc_conn.send_key(idx, data))
+            return on_write
+
+        def _make_remote_session(rows, cols, *, shell=None, env=None):
+            return TerminalSession.create_remote(
+                rows=rows, cols=cols, argv=resolve_shell_argv(cfg.shell),
+                on_update=ctx.mark_dirty,
+                on_write=_make_on_write(),
+            )
+
+        ctx.ws._make_session = _make_remote_session
+
+        for sd in init_data.get("sessions_data", []):
+            sess = Session(cfg, theme, ctx.mark_dirty, ctx.ws._make_session, name=sd.get("name", ""))
+            sess.current_window = sd.get("current_window", 0)
+            sess.windows.clear()
+            for w_data in sd.get("windows", []):
+                w_tree = tree_from_json(w_data.get("tree", 0))
+                n_panes = count_panes(w_tree)
+                w_panes = []
+                for _ in range(n_panes):
+                    w_panes.append(TerminalSession.create_remote(
+                        rows=24, cols=80, argv=resolve_shell_argv(cfg.shell),
+                        on_update=ctx.mark_dirty,
+                        on_write=_make_on_write(),
+                    ))
+                sess.windows.append(Window(
+                    tree=w_tree,
+                    focus_pane=max(0, min(w_data.get("focus_pane", 0), n_panes - 1)),
+                    panes=w_panes,
+                ))
+            if not sess.windows:
+                pane = TerminalSession.create_remote(
+                    rows=24, cols=80, argv=resolve_shell_argv(cfg.shell),
+                    on_update=ctx.mark_dirty,
+                    on_write=_make_on_write(),
+                )
+                sess.windows.append(Window(tree=0, focus_pane=0, panes=[pane]))
+            ctx.ws.sessions_list.append(sess)
+
+        ctx.ws.current_session = min(ctx.ws.current_session, max(0, len(ctx.ws.sessions_list) - 1))
+
+        for sess in ctx.ws.sessions_list:
+            sess._make_session = ctx.ws._make_session
+
+        def _send_remote_command(cmd: dict) -> None:
+            try:
+                asyncio.ensure_future(ipc_conn.send_command(cmd))
+            except Exception:
+                pass
+
+        ctx.send_remote_command = _send_remote_command
+
+        buffer_dumps = init_data.get("buffer_dumps", {})
+        global_idx = 0
+        for sess in ctx.ws.sessions_list:
+            for w in sess.windows:
+                for s in w.panes:
+                    buf = buffer_dumps.get(str(global_idx))
+                    if buf:
+                        try:
+                            s.restore_buffer(buf)
+                        except Exception:
+                            pass
+                    global_idx += 1
+
+        def _on_pane_output(pane_idx: int, data: bytes) -> None:
+            pane = None
+            gi = 0
+            for sess in ctx.ws.sessions_list:
+                for w in sess.windows:
+                    for s in w.panes:
+                        if gi == pane_idx:
+                            pane = s
+                        gi += 1
+            if pane and not pane.closed:
+                pane.feed_remote(data)
+                ctx.dirty = True
+
+        def _on_state_update(state: dict) -> None:
+            sessions_data = state.get("sessions_data", [])
+            new_sessions_count = len(sessions_data)
+
+            while len(ctx.ws.sessions_list) > new_sessions_count:
+                old = ctx.ws.sessions_list.pop()
+                old.shutdown()
+
+            for si, sd in enumerate(sessions_data):
+                if si < len(ctx.ws.sessions_list):
+                    sess = ctx.ws.sessions_list[si]
+                    sess.name = sd.get("name", sess.name)
+                    sess.current_window = sd.get("current_window", 0)
+                    new_windows_data = sd.get("windows", [])
+                    while len(sess.windows) > len(new_windows_data):
+                        w = sess.windows.pop()
+                        for s in w.panes:
+                            s.close()
+                    for wi, w_data in enumerate(new_windows_data):
+                        w_tree = tree_from_json(w_data.get("tree", 0))
+                        n_panes = count_panes(w_tree)
+                        if wi < len(sess.windows):
+                            w = sess.windows[wi]
+                            w.tree = w_tree
+                            w.focus_pane = w_data.get("focus_pane", 0)
+                            while len(w.panes) > n_panes:
+                                old_pane = w.panes.pop()
+                                old_pane.close()
+                            while len(w.panes) < n_panes:
+                                w.panes.append(TerminalSession.create_remote(
+                                    rows=24, cols=80, argv=resolve_shell_argv(cfg.shell),
+                                    on_update=ctx.mark_dirty,
+                                    on_write=_make_on_write(),
+                                ))
+                        else:
+                            w_panes = []
+                            for _ in range(n_panes):
+                                w_panes.append(TerminalSession.create_remote(
+                                    rows=24, cols=80, argv=resolve_shell_argv(cfg.shell),
+                                    on_update=ctx.mark_dirty,
+                                    on_write=_make_on_write(),
+                                ))
+                            sess.windows.append(Window(
+                                tree=w_tree,
+                                focus_pane=max(0, min(w_data.get("focus_pane", 0), max(0, n_panes - 1))),
+                                panes=w_panes,
+                            ))
+                else:
+                    new_sess = Session(cfg, theme, ctx.mark_dirty, ctx.ws._make_session, name=sd.get("name", ""))
+                    new_sess.current_window = sd.get("current_window", 0)
+                    for w_data in sd.get("windows", []):
+                        w_tree = tree_from_json(w_data.get("tree", 0))
+                        n_panes = count_panes(w_tree)
+                        w_panes = []
+                        for _ in range(n_panes):
+                            w_panes.append(TerminalSession.create_remote(
+                                rows=24, cols=80, argv=resolve_shell_argv(cfg.shell),
+                                on_update=ctx.mark_dirty,
+                                on_write=_make_on_write(),
+                            ))
+                        new_sess.windows.append(Window(
+                            tree=w_tree,
+                            focus_pane=max(0, min(w_data.get("focus_pane", 0), max(0, n_panes - 1))),
+                            panes=w_panes,
+                        ))
+                    if not new_sess.windows:
+                        pane = TerminalSession.create_remote(
+                            rows=24, cols=80, argv=resolve_shell_argv(cfg.shell),
+                            on_update=ctx.mark_dirty,
+                            on_write=_make_on_write(),
+                        )
+                        new_sess.windows.append(Window(tree=0, focus_pane=0, panes=[pane]))
+                    new_sess._make_session = ctx.ws._make_session
+                    ctx.ws.sessions_list.append(new_sess)
+
+            ctx.ws.current_session = state.get("current_session", ctx.ws.current_session)
+            ctx.dirty = True
+
+        def _on_pane_closed(pane_idx: int) -> None:
+            gi = 0
+            for sess in ctx.ws.sessions_list:
+                for w in sess.windows:
+                    for i, s in enumerate(w.panes):
+                        if gi == pane_idx:
+                            s._closed = True
+                            ctx.dirty = True
+                        gi += 1
+
+        ipc_conn._on_pane_output = _on_pane_output
+        ipc_conn._on_state_update = _on_state_update
+        ipc_conn._on_pane_closed = _on_pane_closed
+
+    elif attach_mode:
         state, fds = await connect_and_receive()
         ctx.ws = build_workspace_from_state(state, cfg, theme, ctx.mark_dirty, target_session)
     else:
         snap = try_load_snapshot(cfg) if cfg.session.auto_save else None
         ctx.ws = await asyncio.to_thread(
-            PaneWorkspace, cfg, theme, on_dirty=ctx.mark_dirty, restore=snap
+            TmuxServer, cfg, theme, on_dirty=ctx.mark_dirty, restore=snap
         )
         if snap is not None:
             emit_hook("session_loaded", ExtensionContext(hook_name="session_loaded"))
 
     loop = asyncio.get_running_loop()
 
+    ipc_recv_task: asyncio.Task | None = None
+    if remote_mode and ipc_conn is not None:
+        async def _ipc_recv_loop() -> None:
+            try:
+                await ipc_conn.recv_loop()
+            except (ConnectionResetError, BrokenPipeError, OSError):
+                pass
+            finally:
+                ctx.running = False
+        ipc_recv_task = asyncio.create_task(_ipc_recv_loop())
+
     def _handle_sigint() -> None:
         ctx.dirty = True
         ctx.sigint_flagged = True
-        if ctx.ws.sessions:
+        if not remote_mode and ctx.ws._window().panes:
             s = ctx.ws.active_session()
             s.write_text("\x03")
             try:
@@ -274,6 +493,8 @@ async def async_main(
                     os.kill(s.proc.pid, signal.SIGINT)
             except OSError:
                 pass
+        elif remote_mode and ipc_conn:
+            asyncio.ensure_future(ipc_conn.send_key(0, b"\x03"))
 
     sig_handler_ok = False
     try:
@@ -294,6 +515,7 @@ async def async_main(
 
     clock_task = asyncio.create_task(clock_ticker())
     status_task = asyncio.create_task(status_refresh_ticker())
+    pet_task = asyncio.create_task(pet_ticker())
 
     config_watcher = _ConfigWatcher(config_path)
     config_watcher.start(lambda: setattr(ctx, 'config_reload_pending', True))
@@ -321,12 +543,33 @@ async def async_main(
                 pass
 
     def persist() -> None:
+        from plmux.session.models import tree_to_json
         buffer_dumps: dict[str, str] = {}
-        for i, s in enumerate(ctx.ws.sessions):
-            try:
-                buffer_dumps[str(i)] = s.dump_buffer()
-            except Exception:
-                pass
+        sessions_data: list[dict] = []
+        global_idx = 0
+        for sess in ctx.ws.sessions_list:
+            pane_offset = global_idx
+            for w in sess.windows:
+                for s in w.panes:
+                    try:
+                        buffer_dumps[str(global_idx)] = s.dump_buffer()
+                    except Exception:
+                        pass
+                    global_idx += 1
+            windows_data = []
+            for w in sess.windows:
+                windows_data.append({
+                    "tree": tree_to_json(w.tree),
+                    "focus_pane": w.focus_pane,
+                })
+            sessions_data.append({
+                "name": sess.name,
+                "windows": windows_data,
+                "current_window": sess.current_window,
+                "pane_offset": pane_offset,
+                "pane_count": global_idx - pane_offset,
+            })
+        cur_sess = ctx.ws._session()
         save_session(
             cfg,
             tree=ctx.ws.tree,
@@ -335,6 +578,8 @@ async def async_main(
             cwd=os.getcwd(),
             extra_meta={"argv0": sys.argv[0], "theme": ctx.ws.theme.name},
             buffer_dumps=buffer_dumps,
+            sessions_data=sessions_data,
+            current_session=ctx.ws.current_session,
         )
         emit_hook("session_saved", ExtensionContext(hook_name="session_saved"))
 
@@ -358,38 +603,59 @@ async def async_main(
             input_reader = _InputReader(term)
             frame_count = 0
             plugins_loaded = False
-            profiler = get_frame_profiler(slow_threshold_ms=16.0, exclude_from_slow={"input"})
+            _last_resize_rows = 0
+            _last_resize_cols = 0
             try:
                 while ctx.running:
                     frame_count += 1
+                    frame_start = time.monotonic()
 
                     if not plugins_loaded and frame_count >= 2:
                         plugins_loaded = True
+                        load_config_hooks(cfg.hooks.hooks)
                         load_plugins(cfg.extensions.enabled, cfg.extensions.search_paths)
                         emit_hook(
                             "app_started",
                             ExtensionContext(extra_config=dict(cfg.extra)),
                         )
-                    frame_timer = PerfTimer()
-                    frame_start = time.monotonic()
 
                     tw, th = _terminal_size(term)
                     console.size = ConsoleDimensions(width=tw, height=th)
 
                     inner_rows = max(cfg.ui.min_pane_rows, th - 2)
                     inner_cols = max(cfg.ui.min_pane_cols, tw)
+                    ctx.content_rows = inner_rows
+                    ctx.content_cols = inner_cols
                     ctx.ws.sync_geometry(inner_rows, inner_cols)
 
-                    t_pty = PerfTimer()
-                    TerminalSession.pump_all_sessions(ctx.ws.sessions)
-                    pty_ms = t_pty.elapsed_ms()
+                    if remote_mode and ipc_conn is not None:
+                        if inner_rows != _last_resize_rows or inner_cols != _last_resize_cols:
+                            _last_resize_rows = inner_rows
+                            _last_resize_cols = inner_cols
+                            try:
+                                asyncio.ensure_future(ipc_conn.send_resize(inner_rows, inner_cols))
+                            except Exception:
+                                pass
+
+                    if not remote_mode:
+                        TerminalSession.pump_all_sessions(ctx.ws.all_panes())
+                    else:
+                        for sess in ctx.ws.sessions_list:
+                            for w in sess.windows:
+                                for s in w.panes:
+                                    if s.is_remote and not s.closed:
+                                        try:
+                                            s._pump_queue()
+                                        except Exception:
+                                            pass
 
                     keys = input_reader.get_all()
-                    input_ms = frame_timer.elapsed_ms()
 
                     if ctx.sigint_flagged:
                         ctx.sigint_flagged = False
-                        if ctx.ws.sessions:
+                        if remote_mode and ipc_conn:
+                            asyncio.ensure_future(ipc_conn.send_key(0, b"\x03"))
+                        elif ctx.ws._window().panes:
                             s = ctx.ws.active_session()
                             s.write_text("\x03")
                             try:
@@ -427,19 +693,23 @@ async def async_main(
                         mouse_handled = handle_mouse_event(key, ctx, ctx.ws, inner_rows, inner_cols)
                         if not mouse_handled:
                             if ctx.mode == "normal" and ctx.ws and ctx.ws.focus_pane is not None:
-                                fs = ctx.ws.sessions[ctx.ws.focus_pane]
-                                if fs.scroll_offset > 0:
-                                    fs.scroll_offset = 0
-                                    ctx.dirty = True
+                                win = ctx.ws._window()
+                                if win.focus_pane < len(win.panes):
+                                    fs = win.panes[win.focus_pane]
+                                    if fs.scroll_offset > 0:
+                                        fs.scroll_offset = 0
+                                        ctx.dirty = True
                             dispatch_key(key, ctx)
-                        TerminalSession.pump_all_sessions(ctx.ws.sessions)
+                        if not remote_mode:
+                            TerminalSession.pump_all_sessions(ctx.ws.all_panes())
 
                     try:
                         from plmux.web.server import drain_web_keys
                         web_keys = drain_web_keys()
                         for wk in web_keys:
                             dispatch_key(wk, ctx)
-                            TerminalSession.pump_all_sessions(ctx.ws.sessions)
+                            if not remote_mode:
+                                TerminalSession.pump_all_sessions(ctx.ws.all_panes())
                         if web_keys:
                             ctx.dirty = True
                     except Exception:
@@ -456,27 +726,46 @@ async def async_main(
                     except Exception:
                         pass
 
-                    dead_indices = [i for i, s in enumerate(ctx.ws.sessions) if s.closed]
+                    win = ctx.ws._window()
+                    dead_indices = [i for i, s in enumerate(win.panes) if s.closed]
                     if dead_indices:
                         for i in sorted(dead_indices, reverse=True):
                             if not ctx.ws.remove_pane(i):
+                                ctx.hard_quit_requested = True
                                 ctx.running = False
                         ctx.dirty = True
-                        if ctx.running and not ctx.ws.sessions:
+                        if ctx.running and not win.panes:
+                            ctx.hard_quit_requested = True
                             ctx.running = False
                         if not ctx.running:
                             continue
 
-                    render_ms = 0.0
+                    for si, sess in enumerate(ctx.ws.sessions_list):
+                        if si == ctx.ws.current_session:
+                            continue
+                        for w in sess.windows:
+                            dead = [i for i, s in enumerate(w.panes) if s.closed]
+                            for di in sorted(dead, reverse=True):
+                                if di < len(w.panes):
+                                    w.panes[di].close()
+                                    del w.panes[di]
+                                    new_tree = remove_pane_collapse(w.tree, di)
+                                    if new_tree is None:
+                                        w.tree = 0
+                                    else:
+                                        w.tree = reindex_after_remove(new_tree, di)
+                            if not w.panes:
+                                w.tree = 0
+                                w.focus_pane = 0
+
                     if ctx.dirty or keys:
-                        t_render = PerfTimer()
                         extra_items = []
                         if ctx.broadcast_enabled:
-                            extra_items.append(("BCAST", ctx.ws.theme.status_pane_style, "left"))
+                            extra_items.append(("SYNC", ctx.ws.theme.status_pane_style, "left"))
                         if getattr(ctx.ws, "zoom_pane", None) is not None:
                             extra_items.append(("ZOOM", ctx.ws.theme.status_win_style, "left"))
                         if ctx.mode == "copy":
-                            s_copy = ctx.ws.active_session() if ctx.copy_pane is None else ctx.ws.sessions[ctx.copy_pane]
+                            s_copy = ctx.ws.active_session() if ctx.copy_pane is None else ctx.ws._window().panes[ctx.copy_pane]
                             sb_len = s_copy.scrollback_len
                             offset = ctx.copy_scroll_offset
                             copy_label = "COPY"
@@ -489,11 +778,13 @@ async def async_main(
                                 copy_label = f"SEARCH: {ctx.copy_search_query}_"
                             extra_items.append((copy_label, ctx.ws.theme.status_pane_style, "left"))
                         elif ctx.mode == "normal" and ctx.ws and ctx.ws.focus_pane is not None:
-                            fs = ctx.ws.sessions[ctx.ws.focus_pane]
-                            so = fs.scroll_offset
-                            if so > 0:
-                                sb_len = fs.scrollback_len
-                                extra_items.append((f"↑{so}/{sb_len}", ctx.ws.theme.status_pane_style, "left"))
+                            win = ctx.ws._window()
+                            if win.focus_pane < len(win.panes):
+                                fs = win.panes[win.focus_pane]
+                                so = fs.scroll_offset
+                                if so > 0:
+                                    sb_len = fs.scrollback_len
+                                    extra_items.append((f"↑{so}/{sb_len}", ctx.ws.theme.status_pane_style, "left"))
                         extra_items.extend(get_plugin_status_items())
                         root = await asyncio.to_thread(
                             build_root,
@@ -506,18 +797,20 @@ async def async_main(
                             terminal_height=th,
                             help_active=(ctx.mode == "help"),
                             help_tab=ctx.help_tab,
+                            help_scroll_offset=ctx.help_scroll_offset,
                             theme_list_active=(ctx.mode == "theme_list"),
                             theme_list_cursor=ctx.theme_list_cursor,
                             theme_search_query=ctx.theme_search_query,
                             session_list_active=(ctx.mode == "session_list"),
                             session_list_cursor=ctx.session_list_cursor,
+                            session_list_tab=ctx.session_list_tab,
                             plugin_list_active=(ctx.mode == "plugin_list"),
                             plugin_list_cursor=ctx.plugin_list_cursor,
                             plugin_search_paths=list(cfg.extensions.search_paths),
                             plugin_enabled_names=list(cfg.extensions.enabled),
                             layout_list_active=(ctx.mode == "layout_list"),
                             layout_list_cursor=ctx.layout_list_cursor,
-                            current_panes=len(ctx.ws.sessions),
+                            current_panes=len(ctx.ws._window().panes),
                             clock_str=ctx.clock_str,
                             mode=ctx.mode.upper() if ctx.mode != "normal" else "NORMAL",
                             extra_items=extra_items,
@@ -528,21 +821,13 @@ async def async_main(
                                 "layout_list",
                             ) and get_plugin_overlay(ctx.mode) is not None else "",
                             plugin_state=ctx.plugin_state,
+                            clock_mode_pane=ctx.clock_mode_pane,
+                            pet_mode_pane=ctx.pet_mode_pane,
+                            pet_type=ctx.pet_type,
+                            pet_frame=ctx.pet_frame,
                         )
                         live.update(root)
                         ctx.dirty = False
-                        render_ms = t_render.elapsed_ms()
-
-                    frame_timer.elapsed_ms()
-                    profiler.end_frame({
-                        "input": input_ms,
-                        "pty": pty_ms,
-                        "render": render_ms,
-                    })
-
-                    if frame_count % 60 == 0:
-                        report_session_stats()
-                        reset_session_stats()
 
                     elapsed = time.monotonic() - frame_start
                     poll_interval = min(frame_sleep, 0.004)
@@ -563,14 +848,33 @@ async def async_main(
                 input_reader.stop()
                 config_watcher.stop()
 
+    if ipc_recv_task is not None:
+        ipc_recv_task.cancel()
+        try:
+            await ipc_recv_task
+        except asyncio.CancelledError:
+            pass
+
+    if remote_mode and ipc_conn is not None:
+        try:
+            await ipc_conn.send_detach()
+        except Exception:
+            pass
+        ipc_conn.close()
+
     clock_task.cancel()
     status_task.cancel()
+    pet_task.cancel()
     try:
         await clock_task
     except asyncio.CancelledError:
         pass
     try:
         await status_task
+    except asyncio.CancelledError:
+        pass
+    try:
+        await pet_task
     except asyncio.CancelledError:
         pass
 
@@ -582,10 +886,10 @@ async def async_main(
 
     emit_hook("app_stopping", ExtensionContext())
 
-    if debug:
-        _fastscreen.disable_debug()
-
-    if ctx.detach_requested:
+    if remote_mode:
+        ctx.ws.shutdown()
+        return None
+    elif ctx.detach_requested:
         state = build_detach_state(ctx.ws, cfg)
         print("\r\n[detached (from session 0)]", flush=True)
         return state

@@ -9,6 +9,9 @@ from rich.text import Text
 
 from plmux.ui.theme import Theme
 
+_FIXED_HEIGHT = 20
+_VISIBLE_ROWS = _FIXED_HEIGHT - 6
+
 
 def build_help_overlay(
     theme: Theme,
@@ -16,6 +19,7 @@ def build_help_overlay(
     active_tab: int,
     terminal_width: int,
     terminal_height: int,
+    scroll_offset: int = 0,
     bindings: dict[str, list[str]] | None = None,
 ) -> Panel:
     shortcuts_tab = _build_shortcuts_table(theme, bindings=bindings)
@@ -33,27 +37,57 @@ def build_help_overlay(
             tab_headers.append(" ")
 
     if active_tab == 0:
-        content = shortcuts_tab
+        content, raw_rows = shortcuts_tab
     elif active_tab == 1:
-        content = commands_tab
+        content, raw_rows = commands_tab
     else:
-        content = copy_tab
+        content, raw_rows = copy_tab
+
+    total_rows = len(raw_rows)
+    max_scroll = max(0, total_rows - _VISIBLE_ROWS)
+    scroll_offset = max(0, min(scroll_offset, max_scroll))
+
+    visible_rows = raw_rows[scroll_offset:scroll_offset + _VISIBLE_ROWS]
+
+    scrolled_content = Table(
+        show_header=content.show_header,
+        box=content.box,
+        border_style=content.border_style,
+        padding=content.padding,
+    )
+    for col in content.columns:
+        scrolled_content.add_column(
+            col.header,
+            style=col.style,
+            width=col.width,
+            min_width=col.min_width,
+            max_width=col.max_width,
+            justify=col.justify,
+        )
+    for row_data in visible_rows:
+        scrolled_content.add_row(*row_data)
 
     footer = Text()
     footer.append(" Tab ", style="bold black on #85c751")
     footer.append(" switch  ", style="dim")
+    if max_scroll > 0:
+        footer.append(" Up/Down ", style="bold black on #85c751")
+        footer.append(" scroll  ", style="dim")
     footer.append(" Esc ", style="bold black on #85c751")
     footer.append(" close", style="dim")
+
+    if max_scroll > 0:
+        pct = int((scroll_offset / max_scroll) * 100) if max_scroll > 0 else 100
+        footer.append(f"  [{scroll_offset + 1}-{min(scroll_offset + _VISIBLE_ROWS, total_rows)}/{total_rows}]", style="dim #665c54")
 
     inner = Table.grid(padding=(0, 1))
     inner.add_row(tab_headers)
     inner.add_row("")
-    inner.add_row(content)
+    inner.add_row(scrolled_content)
     inner.add_row("")
     inner.add_row(footer)
 
     max_w = min(terminal_width - 6, 68)
-    max_h = min(terminal_height - 4, 30)
 
     return Panel(
         inner,
@@ -62,13 +96,13 @@ def build_help_overlay(
         border_style=theme.pane_active_border,
         box=box.HEAVY,
         width=max_w,
-        height=max_h,
+        height=_FIXED_HEIGHT,
         style="on #1d2021",
         padding=(1, 2),
     )
 
 
-def _build_shortcuts_table(theme: Theme, *, bindings: dict[str, list[str]] | None = None) -> Table:
+def _build_shortcuts_table(theme: Theme, *, bindings: dict[str, list[str]] | None = None) -> tuple[Table, list[tuple]]:
     t = Table(show_header=True, box=box.SIMPLE, border_style="dim #665c54")
     t.add_column("Key", style="bold #fabd2f", width=18)
     t.add_column("Action", style="#ebdbb2")
@@ -95,19 +129,27 @@ def _build_shortcuts_table(theme: Theme, *, bindings: dict[str, list[str]] | Non
         ("^B 0-9", "Jump to window N"),
         (_keys("cycle-layout"), "Cycle layout (even/main-v/main-h)"),
         (_keys("only-pane"), "Keep only this pane (close others)"),
+        (_keys("synchronize-panes"), "Toggle synchronize-panes (broadcast input)"),
+        (_keys("rotate-window"), "Rotate pane positions within window"),
         (_keys("copy-mode"), "Enter copy mode"),
         (_keys("help"), "Open this help panel"),
         (_keys("detach"), "Detach session (keep running in background)"),
         (_keys("command-line"), "Enter command-line mode"),
+        (_keys("rename-window"), "Rename current window"),
+        (_keys("next-session"), "Switch to next session"),
+        (_keys("prev-session"), "Switch to previous session"),
+        (_keys("switch-session"), "Open session browser"),
+        (_keys("new-session"), "Create a new session"),
+        (_keys("rename-session"), "Rename current session"),
         ("^Q", "Force quit plmux"),
         ("Esc", "Pass through to child program (e.g. vim)"),
     ]
     for key, action in rows:
         t.add_row(key, action)
-    return t
+    return t, rows
 
 
-def _build_commands_table(theme: Theme) -> Table:
+def _build_commands_table(theme: Theme) -> tuple[Table, list[tuple]]:
     t = Table(show_header=True, box=box.SIMPLE, border_style="dim #665c54")
     t.add_column("Command", style="bold #fabd2f", width=20)
     t.add_column("Description", style="#ebdbb2")
@@ -126,21 +168,33 @@ def _build_commands_table(theme: Theme) -> Table:
         ("layout <name>", "Apply named layout template"),
         ("web [port]", "Start web client (default 9888)"),
         ("webstop", "Stop web client server"),
+        ("sync [on|off]", "Toggle synchronize-panes (broadcast input to all panes)"),
+        ("synchronize-panes [on|off]", "Same as :sync"),
+        ("rotate [up|down]", "Rotate pane positions within window"),
+        ("rotate-window [up|down]", "Same as :rotate"),
+        ("clock-mode", "Toggle big clock display in pane"),
+        ("rename-window <name>", "Rename current window"),
+        ("rename-session <name>", "Rename current session"),
+        ("new-session [name]", "Create a new session"),
+        ("kill-session [idx|name]", "Kill a session"),
+        ("switch-session <idx|name>", "Switch to a session"),
+        ("next-session", "Switch to next session"),
+        ("prev-session", "Switch to previous session"),
         ("exit", "Quit plmux (clear all saved state)"),
         ("help", "Show this help window"),
         ("", ""),
         ("CLI: plmux ls", "List active background sessions"),
         ("CLI: plmux lsw", "List windows (add -p for panes)"),
         ("CLI: plmux attach", "Reattach to background session"),
-        ("CLI: plmux new-session", "Create a detached session"),
+        ("CLI: plmux new-session -s <name>", "Create a named detached session"),
         ("CLI: plmux kill-server", "Kill the plmux daemon"),
     ]
     for cmd, desc in rows:
         t.add_row(cmd, desc)
-    return t
+    return t, rows
 
 
-def _build_copy_mode_table(theme: Theme) -> Table:
+def _build_copy_mode_table(theme: Theme) -> tuple[Table, list[tuple]]:
     t = Table(show_header=True, box=box.SIMPLE, border_style="dim #665c54")
     t.add_column("Key", style="bold #fabd2f", width=18)
     t.add_column("Action", style="#ebdbb2")
@@ -152,6 +206,7 @@ def _build_copy_mode_table(theme: Theme) -> Table:
         ("g / G", "Jump to top / bottom of scrollback"),
         ("Home / End", "Move to line start / end"),
         ("V", "Toggle line-selection mode"),
+        ("Ctrl+V", "Toggle rectangle-selection mode"),
         ("/", "Search forward"),
         ("?", "Search backward"),
         ("n / N", "Next / previous search match"),
@@ -163,4 +218,4 @@ def _build_copy_mode_table(theme: Theme) -> Table:
     ]
     for key, action in rows:
         t.add_row(key, action)
-    return t
+    return t, rows

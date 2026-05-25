@@ -1,7 +1,4 @@
 #include "_fastscreen_types.h"
-#include "_fastscreen_debug.h"
-
-extern FsPerfStats _putchar_stats;
 
 int
 screen_init(FastScreen *s, int cols, int rows) {
@@ -109,18 +106,18 @@ screen_reverse_index(FastScreen *s) {
 
 void
 screen_put_char(FastScreen *s, uint32_t cp, int width) {
-    FsPerfTimer _pc_t;
-    if (fs_debug_enabled()) fs_timer_start(&_pc_t);
-
+    int wrap_was_pending = s->pending_wrap;
     if (s->pending_wrap) {
         s->cursor_x = 0;
         screen_line_feed(s);
         s->pending_wrap = 0;
     }
+    int auto_wrapped = 0;
     if (s->cursor_x >= s->cols) {
         if (s->auto_wrap) {
             s->cursor_x = 0;
             screen_line_feed(s);
+            auto_wrapped = 1;
         } else {
             s->cursor_x = s->cols - 1;
         }
@@ -159,11 +156,6 @@ screen_put_char(FastScreen *s, uint32_t cp, int width) {
     s->cursor_x += width;
     if (s->cursor_x >= s->cols) {
         s->pending_wrap = 1;
-    }
-
-    if (fs_debug_enabled()) {
-        double ms = fs_timer_elapsed_ms(&_pc_t);
-        fs_stats_record(&_putchar_stats, ms);
     }
 }
 

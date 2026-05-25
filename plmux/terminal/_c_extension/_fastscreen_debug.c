@@ -214,28 +214,3 @@ fs_debug_write(const char *fmt, ...) {
     pthread_mutex_unlock(&g_fs_debug.mutex);
 #endif
 }
-
-void
-fs_stats_report(FsPerfStats *s, double interval_s) {
-    if (!g_fs_debug.enabled) return;
-
-#ifdef _WIN32
-    LARGE_INTEGER freq, now_li;
-    QueryPerformanceFrequency(&freq);
-    QueryPerformanceCounter(&now_li);
-    double now = (double)now_li.QuadPart / (double)freq.QuadPart;
-#else
-    struct timespec now_ts;
-    clock_gettime(CLOCK_MONOTONIC, &now_ts);
-    double now = (double)now_ts.tv_sec + (double)now_ts.tv_nsec / 1e9;
-#endif
-
-    if (now - s->last_report_time < interval_s) return;
-    s->last_report_time = now;
-
-    if (s->count == 0) return;
-
-    double avg = s->total_ms / (double)s->count;
-    fs_debug_write("C_STATS [%s] count=%d avg=%.3fms min=%.3fms max=%.3fms total=%.1fms\n",
-                   s->name, s->count, avg, s->min_ms, s->max_ms, s->total_ms);
-}

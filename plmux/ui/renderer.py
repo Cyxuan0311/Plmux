@@ -18,8 +18,9 @@ from plmux.ui.theme_list_overlay import build_theme_list_overlay
 from plmux.ui.session_list_overlay import build_session_list_overlay
 from plmux.ui.plugin_list_overlay import build_plugin_list_overlay
 from plmux.ui.layout_list_overlay import build_layout_list_overlay
+from plmux.ui.clock_overlay import build_clock_overlay
 from plmux.extensions.registry import get_plugin_overlay
-from plmux.workspace import PaneWorkspace
+from plmux.workspace import TmuxServer
 
 
 def _build_pane_panel(
@@ -30,10 +31,36 @@ def _build_pane_panel(
     focused: bool,
     title: str,
     in_copy_mode: bool = False,
+    clock_mode: bool = False,
+    clock_str: str = "",
+    pet_mode: bool = False,
+    pet_type: str = "",
+    pet_frame: int = 0,
 ) -> Panel:
     border = theme.pane_active_border if focused else theme.pane_inactive_border
     tstyle = theme.pane_title_active if focused else theme.pane_title_inactive
     bx = box.SQUARE
+
+    if clock_mode:
+        body = build_clock_overlay(
+            theme,
+            pane_rows=session.rows,
+            pane_cols=session.cols,
+            clock_str=clock_str,
+        )
+        return body
+
+    if pet_mode:
+        from plmux.ui.pet_animation import build_pet_overlay
+        body = build_pet_overlay(
+            theme,
+            pane_rows=session.rows,
+            pane_cols=session.cols,
+            pet_type=pet_type,
+            frame=pet_frame,
+        )
+        return body
+
     sel_start = session.copy_sel_start
     sel_end = session.copy_sel_end
     copy_cursor = session.copy_cursor_pos
@@ -51,7 +78,7 @@ def _build_pane_panel(
         )
     else:
         body = session.build_render_text(draw_cursor=focused, sel_start=sel_start, sel_end=sel_end, cursor_pos=copy_cursor)
-    return Panel(
+    panel = Panel(
         body,
         title=Text(title, style=tstyle),
         title_align="left",
@@ -59,26 +86,36 @@ def _build_pane_panel(
         box=bx,
         padding=(0, 0),
     )
+    return panel
 
 
-def build_split_layout(tree: Tree, ws: PaneWorkspace, theme: Theme, *, in_copy_mode: bool = False) -> Layout:
+def build_split_layout(tree: Tree, ws: TmuxServer, theme: Theme, *, in_copy_mode: bool = False, clock_mode_pane: int | None = None, clock_str: str = "", pet_mode_pane: int | None = None, pet_type: str = "", pet_frame: int = 0) -> Layout:
+    win = ws._window()
     if isinstance(tree, int):
         idx = tree
+        if idx >= len(win.panes):
+            return Layout(name=f"pane-{idx}-missing")
+        pane = win.panes[idx]
         return Layout(
             _build_pane_panel(
                 idx,
-                ws.sessions[idx],
+                pane,
                 theme=theme,
-                focused=idx == ws.focus_pane,
+                focused=idx == win.focus_pane,
                 title=ws.pane_title(idx),
                 in_copy_mode=in_copy_mode,
+                clock_mode=(idx == clock_mode_pane),
+                clock_str=clock_str,
+                pet_mode=(idx == pet_mode_pane),
+                pet_type=pet_type,
+                pet_frame=pet_frame,
             ),
             name=f"pane-{idx}",
         )
     direction, ratio, a, b = tree
     root = Layout()
-    left = build_split_layout(a, ws, theme, in_copy_mode=in_copy_mode)
-    right = build_split_layout(b, ws, theme, in_copy_mode=in_copy_mode)
+    left = build_split_layout(a, ws, theme, in_copy_mode=in_copy_mode, clock_mode_pane=clock_mode_pane, clock_str=clock_str, pet_mode_pane=pet_mode_pane, pet_type=pet_type, pet_frame=pet_frame)
+    right = build_split_layout(b, ws, theme, in_copy_mode=in_copy_mode, clock_mode_pane=clock_mode_pane, clock_str=clock_str, pet_mode_pane=pet_mode_pane, pet_type=pet_type, pet_frame=pet_frame)
     left.ratio = max(1, int(ratio * 100))
     right.ratio = max(1, int((1.0 - ratio) * 100))
     if direction == "row":
@@ -105,7 +142,7 @@ def _mode_style(theme: Theme, mode: str) -> str:
 
 
 def build_status_line(
-    ws: PaneWorkspace,
+    ws: TmuxServer,
     platform_name: str,
     terminal_width: int,
     *,
@@ -128,19 +165,32 @@ def build_status_line(
     host_style = ws.theme.status_host_style
     host_bg = _extract_bg(host_style)
 
-    win_count = len(ws.windows)
-    pane_count = len(ws.sessions)
-    win_label = f"W{ws.current_window + 1}" if win_count <= 1 else f"W{ws.current_window + 1}/{win_count}"
-    pane_label = f"P{ws.focus_pane + 1}" if pane_count <= 1 else f"P{ws.focus_pane + 1}/{pane_count}"
+    win_count = len(ws._session().windows)
+    win = ws._window()
+    pane_count = len(win.panes)
+    win_name = win.name
+
+    sess_count = len(ws.sessions_list)
+    sess_name = ws.session_name
+    sess_base = f"S{ws.current_session + 1}" if sess_count <= 1 else f"S{ws.current_session + 1}/{sess_count}"
+    sess_label = f"{sess_base}:{sess_name}" if sess_name else sess_base
+
+    win_base = f"W{ws._session().current_window + 1}" if win_count <= 1 else f"W{ws._session().current_window + 1}/{win_count}"
+    win_label = f"{win_base}:{win_name}" if win_name else win_base
+    pane_label = f"P{win.focus_pane + 1}" if pane_count <= 1 else f"P{win.focus_pane + 1}/{pane_count}"
 
     current_cmd = ""
-    if ws.focus_pane < len(ws.sessions):
-        current_cmd = ws.sessions[ws.focus_pane].current_command
+    if win.focus_pane < pane_count:
+        current_cmd = win.panes[win.focus_pane].current_command
 
     left = Text()
 
     left.append(f" {mode} ", style=mode_style)
     left.append("\uE0B0", style=f"{mode_bg} on {win_bg}")
+
+    if sess_count > 1:
+        left.append(f" {sess_label} ", style=win_style)
+        left.append("\uE0B0", style=f"{win_bg} on {pane_bg}")
 
     left.append(f" {win_label} ", style=win_style)
     left.append("\uE0B0", style=f"{win_bg} on {pane_bg}")
@@ -210,7 +260,7 @@ def build_cmdline(
     else:
         text.append(" READY ", style=theme.cmdline_indicator)
         hint = (
-            " Esc+: cmd  │  ^B prefix"
+            "^B +: cmd  │  ^B prefix"
         )
         max_w = max(24, terminal_width - 12)
         if len(hint) > max_w:
@@ -226,7 +276,7 @@ def build_cmdline(
 
 
 def build_root(
-    ws: PaneWorkspace,
+    ws: TmuxServer,
     *,
     status_position: str,
     extra_items: list[tuple[str, str]] | None = None,
@@ -236,11 +286,13 @@ def build_root(
     terminal_width: int,
     help_active: bool = False,
     help_tab: int = 0,
+    help_scroll_offset: int = 0,
     theme_list_active: bool = False,
     theme_list_cursor: int = 0,
     theme_search_query: str = "",
     session_list_active: bool = False,
     session_list_cursor: int = 0,
+    session_list_tab: int = 0,
     plugin_list_active: bool = False,
     plugin_list_cursor: int = 0,
     plugin_search_paths: list[str] | None = None,
@@ -254,6 +306,10 @@ def build_root(
     completion_hints: str = "",
     plugin_overlay_name: str = "",
     plugin_state: dict | None = None,
+    clock_mode_pane: int | None = None,
+    pet_mode_pane: int | None = None,
+    pet_type: str = "",
+    pet_frame: int = 0,
 ) -> Layout:
     theme = ws.theme
     # support additional status indicators
@@ -262,19 +318,25 @@ def build_root(
     # support zoomed single-pane view if workspace requests it
     zoom_idx = getattr(ws, "zoom_pane", None)
     is_copy = mode.upper() == "COPY"
+    win = ws._window()
     if zoom_idx is not None:
         main = Layout(
             _build_pane_panel(
                 zoom_idx,
-                ws.sessions[zoom_idx],
+                win.panes[zoom_idx],
                 theme=theme,
-                focused=zoom_idx == ws.focus_pane,
+                focused=zoom_idx == win.focus_pane,
                 title=ws.pane_title(zoom_idx),
                 in_copy_mode=is_copy,
+                clock_mode=(zoom_idx == clock_mode_pane),
+                clock_str=clock_str,
+                pet_mode=(zoom_idx == pet_mode_pane),
+                pet_type=pet_type,
+                pet_frame=pet_frame,
             )
         )
     else:
-        main = build_split_layout(ws.tree, ws, theme, in_copy_mode=is_copy)
+        main = build_split_layout(ws.tree, ws, theme, in_copy_mode=is_copy, clock_mode_pane=clock_mode_pane, clock_str=clock_str, pet_mode_pane=pet_mode_pane, pet_type=pet_type, pet_frame=pet_frame)
     status_text = build_status_line(
         ws, platform_name, terminal_width, clock_str=clock_str, mode=mode, extra_items=extra_items
     )
@@ -294,6 +356,7 @@ def build_root(
             active_tab=help_tab,
             terminal_width=terminal_width,
             terminal_height=terminal_height,
+            scroll_offset=help_scroll_offset,
             bindings=ws.cfg.keys.bindings,
         )
         centered_help = Align.center(help_panel, vertical="middle")
@@ -337,6 +400,7 @@ def build_root(
             ws,
             theme,
             cursor=session_list_cursor,
+            active_tab=session_list_tab,
             terminal_width=terminal_width,
             terminal_height=terminal_height,
         )

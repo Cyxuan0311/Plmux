@@ -114,7 +114,7 @@ def handle_mouse_event(
         if mx < 0 or my < 0:
             return True
 
-        focused_s = ws.sessions[ws.focus_pane] if ws.sessions else None
+        focused_s = ws._window().panes[ws.focus_pane] if ws._window().panes else None
         child_mouse = focused_s.screen.mouse_mode if focused_s else 0
         if child_mouse and focused_s is not None:
             raw = str(key)
@@ -159,10 +159,11 @@ def handle_mouse_event(
                             ctx.mouse_resize_start_y = my
                 ctx.dirty = True
         elif is_scroll:
+            win = ws._window()
             for idx, r in rects.items():
                 if r.row <= my < (r.row + r.rows) and r.col <= mx < (r.col + r.cols):
                     ws.focus_pane = idx
-                    s = ws.sessions[idx]
+                    s = win.panes[idx]
                     if ctx.mode == "copy" or ctx.copy_pane == idx:
                         if is_scroll_up:
                             ctx.copy_scroll_offset = min(ctx.copy_scroll_offset + 3, s.scrollback_len)
@@ -198,6 +199,7 @@ def handle_mouse_event(
                 ctx.mouse_resize_tree = border
                 ctx.dirty = True
             else:
+                win = ws._window()
                 for idx, r in rects.items():
                     if r.row <= my < (r.row + r.rows) and r.col <= mx < (r.col + r.cols):
                         ws.focus_pane = idx
@@ -207,11 +209,11 @@ def handle_mouse_event(
                         if is_press:
                             if ctx.mode == "copy":
                                 ctx.copy_cursor = (
-                                    max(0, min(local_y, ws.sessions[idx].rows - 1)),
-                                    max(0, min(local_x, ws.sessions[idx].cols - 1)),
+                                    max(0, min(local_y, win.panes[idx].rows - 1)),
+                                    max(0, min(local_x, win.panes[idx].cols - 1)),
                                 )
                                 ctx.copy_pane = idx
-                                ws.sessions[idx].copy_sel_end = ctx.copy_cursor
+                                win.panes[idx].copy_sel_end = ctx.copy_cursor
                             ctx.mouse_dragging = True
                             ctx.mouse_drag_pane = idx
                         elif is_release:

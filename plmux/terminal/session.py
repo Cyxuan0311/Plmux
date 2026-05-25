@@ -9,6 +9,7 @@ import queue
 import re
 import sys
 import threading
+import time
 import zlib
 from typing import Any, Callable, Optional
 
@@ -26,16 +27,9 @@ from plmux.platform.pty_factory import spawn_pty
 from plmux.platform.pty_handle import PtyHandle
 from plmux.platform.shell import resolve_shell_argv
 from plmux.terminal.pyte_render import _cursor_overlay_style, _safe_glyph
-from plmux.debug_log import PerfStats, PerfTimer
+from plmux.debug_log import dbg, win_dbg, is_debug_enabled
 
 _OSC_RE = re.compile(r"\x1b\][^\x07]*\x07")
-
-_feed_stats = PerfStats("pyte.feed")
-_render_stats = PerfStats("session.build_render_text")
-_reader_feed_stats = PerfStats("reader.feed")
-_reader_read_stats = PerfStats("reader.read")
-_select_stats = PerfStats("select_and_feed")
-_line_runs_stats = PerfStats("session._build_line_runs")
 
 
 class TerminalContent:
@@ -58,6 +52,7 @@ class TerminalContent:
         self._height = height
 
     def __rich_console__(self, console: Console, options):
+        emitted = 0
         for i, line in enumerate(self._lines):
             parts = self._ANSI_RE.split(line)
             for part in parts:
@@ -67,9 +62,11 @@ class TerminalContent:
                     yield Segment(part, style=None, control=True)
                 else:
                     yield Segment(part, style=None)
+                emitted += 1
             if i < len(self._lines) - 1:
                 yield Segment("\n", style=None)
-
+        if len(self._lines) > 0:
+            last_line = self._lines[-1]
     def __rich_measure__(self, console: Console, options):
         return Measurement(self._width, self._width)
 
@@ -104,6 +101,8 @@ class TerminalSession:
             env=self._env_extra,
         )
         self._closed = False
+        self._cached_closed = False
+        self._last_alive_check = 0.0
         self._pty_nonblocking = False
         self._app_cursor_keys = False
         self._screen_lock = threading.Lock()
@@ -123,6 +122,7 @@ class TerminalSession:
         self._copy_sel_end: tuple[int, int] | None = None
         self._copy_search_matches: list[tuple[int, int]] | None = None
         self._copy_line_mode: bool = False
+        self._copy_rect_mode: bool = False
 
     @property
     def scroll_offset(self) -> int:
@@ -180,6 +180,14 @@ class TerminalSession:
     def copy_line_mode(self, value: bool) -> None:
         self._copy_line_mode = value
 
+    @property
+    def copy_rect_mode(self) -> bool:
+        return self._copy_rect_mode
+
+    @copy_rect_mode.setter
+    def copy_rect_mode(self, value: bool) -> None:
+        self._copy_rect_mode = value
+
     @classmethod
     def from_existing(
         cls,
@@ -205,6 +213,8 @@ class TerminalSession:
         self.stream.attach(self.screen)
         self.proc = PtyHandle(fd, pid, _sock=_sock)
         self._closed = False
+        self._cached_closed = False
+        self._last_alive_check = 0.0
         self._pty_nonblocking = False
         self._app_cursor_keys = False
         self._screen_lock = threading.Lock()
@@ -224,7 +234,62 @@ class TerminalSession:
         self._copy_sel_end = None
         self._copy_search_matches = None
         self._copy_line_mode = False
+        self._copy_rect_mode = False
         return self
+
+    @classmethod
+    def create_remote(
+        cls,
+        rows: int,
+        cols: int,
+        argv: list[str],
+        *,
+        on_update: Optional[Callable[[], None]] = None,
+        on_write: Optional[Callable[[bytes], None]] = None,
+    ) -> "TerminalSession":
+        self = cls.__new__(cls)
+        self.rows = max(1, rows)
+        self.cols = max(1, cols)
+        self._argv = list(argv)
+        self._env_extra = {}
+        self._on_update = on_update
+        self._scrollback_max = cls.DEFAULT_SCROLLBACK
+        self._scrollback: list[str] = []
+        self.screen = Screen(self.cols, self.rows)
+        self.stream = ByteStream()
+        self.stream.attach(self.screen)
+        self.proc = None
+        self._closed = False
+        self._cached_closed = False
+        self._last_alive_check = 0.0
+        self._pty_nonblocking = False
+        self._app_cursor_keys = False
+        self._screen_lock = threading.Lock()
+        self._read_queue: queue.Queue[bytes] = queue.Queue()
+        self._reader_thread = None
+        self._line_cache: dict[int, list[tuple[str, str | None]]] = {}
+        self._last_cursor_y: int = -1
+        self._last_cursor_x: int = -1
+        self._scroll_offset: int = 0
+        self._copy_scroll_offset: int = 0
+        self._copy_cursor_pos: tuple[int, int] | None = None
+        self._copy_sel_start: tuple[int, int] | None = None
+        self._copy_sel_end: tuple[int, int] | None = None
+        self._copy_search_matches: list[tuple[int, int]] | None = None
+        self._copy_line_mode: bool = False
+        self._copy_rect_mode: bool = False
+        self._on_write = on_write
+        self._is_remote = True
+        return self
+
+    def feed_remote(self, data: bytes) -> None:
+        if self._closed:
+            return
+        self._read_queue.put(data)
+
+    @property
+    def is_remote(self) -> bool:
+        return getattr(self, "_is_remote", False)
 
     @property
     def argv(self) -> list[str]:
@@ -233,6 +298,8 @@ class TerminalSession:
     @property
     def current_command(self) -> str:
         if self._closed:
+            return ""
+        if self.proc is None:
             return ""
         pid = self.proc.pid
         if sys.platform == "linux":
@@ -338,6 +405,9 @@ class TerminalSession:
             return ""
 
     def _set_nonblocking(self) -> None:
+        if self.proc is None:
+            self._pty_nonblocking = False
+            return
         if sys.platform == "win32" or os.name == "nt" or _fcntl is None:
             self._pty_nonblocking = False
             return
@@ -350,7 +420,9 @@ class TerminalSession:
             self._pty_nonblocking = False
 
     def fileno(self) -> int:
-        return self.proc.fileno()
+        if self.proc is not None:
+            return self.proc.fileno()
+        return -1
 
     _DECSET_RE = re.compile(rb"\x1b\[\?(\d+)h")
     _DECRST_RE = re.compile(rb"\x1b\[\?(\d+)l")
@@ -386,22 +458,51 @@ class TerminalSession:
         if snapshot is None:
             return
         n = min(n, len(snapshot))
+        sb_before = len(self._scrollback)
         for i in range(n):
             self._scrollback.append(snapshot[i])
         if len(self._scrollback) > self._scrollback_max:
             excess = len(self._scrollback) - self._scrollback_max
             del self._scrollback[:excess]
+        if is_debug_enabled():
+            dbg("_capture_scrollback: n=%d sb_before=%d sb_after=%d snapshot_len=%d rows=%d cols=%d",
+                n, sb_before, len(self._scrollback), len(snapshot) if snapshot else 0, self.rows, self.cols)
 
     def feed(self, data: bytes) -> None:
         if not data:
             return
+        cx_before = self.screen.cursor.x
+        cy_before = self.screen.cursor.y
+        sc_before = self.screen.scroll_count
         self._detect_modes(data)
         snapshot = self._snapshot_screen_rows() if self._scrollback_max > 0 else None
-        t = PerfTimer()
         self.stream.feed(data)
-        ms = t.elapsed_ms()
-        _feed_stats.record(ms)
         self._capture_scrollback(snapshot)
+        if is_debug_enabled():
+            dbg("feed: data=%d cx=%d->%d cy=%d->%d scroll_count=%d->%d rows=%d cols=%d",
+                len(data), cx_before, self.screen.cursor.x, cy_before, self.screen.cursor.y,
+                sc_before, self.screen.scroll_count, self.rows, self.cols)
+        if self._on_update:
+            self._on_update()
+
+    def feed_batch(self, data_list: list[bytes]) -> None:
+        if not data_list:
+            return
+        cx_before = self.screen.cursor.x
+        cy_before = self.screen.cursor.y
+        sc_before = self.screen.scroll_count
+        total_bytes = sum(len(d) for d in data_list)
+        snapshot = self._snapshot_screen_rows() if self._scrollback_max > 0 else None
+        for data in data_list:
+            if not data:
+                continue
+            self._detect_modes(data)
+            self.stream.feed(data)
+        self._capture_scrollback(snapshot)
+        if is_debug_enabled():
+            dbg("feed_batch: chunks=%d total_bytes=%d cx=%d->%d cy=%d->%d scroll_count=%d->%d rows=%d cols=%d",
+                len(data_list), total_bytes, cx_before, self.screen.cursor.x, cy_before, self.screen.cursor.y,
+                sc_before, self.screen.scroll_count, self.rows, self.cols)
         if self._on_update:
             self._on_update()
 
@@ -434,12 +535,21 @@ class TerminalSession:
     def _reader_loop(self) -> None:
         is_win = sys.platform == "win32" or os.name == "nt"
         idle_sleep = 0.001 if is_win else 0.005
+        read_count = 0
         while not self._closed:
             try:
                 if is_win:
                     data = self.proc.read(65536)
                     if isinstance(data, str):
+                        orig_len = len(data)
                         data = data.encode("utf-8", errors="replace")
+                        if orig_len > 0 and len(data) != orig_len:
+                            win_dbg("_reader_loop str->bytes encoding changed size: str=%d bytes=%d", orig_len, len(data))
+                    if data:
+                        read_count += 1
+                        if read_count % 200 == 1:
+                            win_dbg("_reader_loop read #%d: %d bytes, cx=%d cy=%d rows=%d cols=%d",
+                                    read_count, len(data), self.screen.cursor.x, self.screen.cursor.y, self.rows, self.cols)
                 else:
                     try:
                         data = os.read(self.fileno(), 65536)
@@ -495,35 +605,51 @@ class TerminalSession:
         *,
         trace_label: str = "",
     ) -> None:
-        t = PerfTimer()
         for s in sessions:
             if not s._closed:
                 s._pump_queue()
-        ms = t.elapsed_ms()
-        _select_stats.record(ms)
 
     def _pump_queue(self) -> None:
         had_data = False
+        total_bytes = 0
+        chunks = 0
+        cx_before = self.screen.cursor.x
+        cy_before = self.screen.cursor.y
+        sc_before = self.screen.scroll_count
+        need_snapshot = self._scrollback_max > 0 and not self.screen.use_alt_screen
+        snapshot = self._snapshot_screen_rows() if need_snapshot else None
         while True:
             try:
                 data = self._read_queue.get_nowait()
             except queue.Empty:
                 break
+            total_bytes += len(data)
+            chunks += 1
             self._detect_modes(data)
-            snapshot = self._snapshot_screen_rows() if self._scrollback_max > 0 else None
-            t_feed = PerfTimer()
             self.stream.feed(data)
-            feed_ms = t_feed.elapsed_ms()
-            _reader_feed_stats.record(feed_ms)
-            self._capture_scrollback(snapshot)
             had_data = True
         if had_data:
+            sc_after = self.screen.scroll_count
+            cx_after = self.screen.cursor.x
+            cy_after = self.screen.cursor.y
+            self._capture_scrollback(snapshot)
+            if is_debug_enabled():
+                is_win = sys.platform == "win32" or os.name == "nt"
+                prefix = "WIN_PUMP" if is_win else "PUMP"
+                dbg("%s: chunks=%d bytes=%d cx=%d->%d cy=%d->%d scroll_count=%d->%d rows=%d cols=%d",
+                    prefix, chunks, total_bytes, cx_before, cx_after, cy_before, cy_after,
+                    sc_before, sc_after, self.rows, self.cols)
             if self._scroll_offset > 0:
                 self._scroll_offset = 0
             self._on_update()
 
     def write_bytes(self, data: bytes) -> None:
         if self._closed:
+            return
+        if self.is_remote:
+            cb = getattr(self, "_on_write", None)
+            if cb is not None:
+                cb(data)
             return
         try:
             self.proc.write(data)
@@ -541,12 +667,25 @@ class TerminalSession:
         cols = max(1, cols)
         if rows == self.rows and cols == self.cols:
             return
+        old_rows, old_cols = self.rows, self.cols
+        old_cx = self.screen.cursor.x
+        old_cy = self.screen.cursor.y
         self.rows, self.cols = rows, cols
         self.screen.resize(rows, cols)
-        try:
-            self.proc.setwinsize(rows, cols)
-        except OSError:
-            pass
+        new_cx = self.screen.cursor.x
+        new_cy = self.screen.cursor.y
+        if is_debug_enabled():
+            dbg("resize: %dx%d -> %dx%d  cursor=(%d,%d)->(%d,%d)",
+                old_cols, old_rows, cols, rows,
+                old_cx, old_cy, new_cx, new_cy)
+        if self.proc is not None:
+            try:
+                self.proc.setwinsize(rows, cols)
+                if is_debug_enabled():
+                    dbg("resize: proc.setwinsize(%d,%d) OK", rows, cols)
+            except OSError:
+                if is_debug_enabled():
+                    dbg("resize: proc.setwinsize(%d,%d) FAILED (OSError)", rows, cols)
         if self._on_update:
             self._on_update()
 
@@ -554,16 +693,22 @@ class TerminalSession:
         if self._closed:
             return
         self._closed = True
-        try:
-            self.proc.close(force=True)
-        except Exception:
-            pass
+        if self.proc is not None:
+            try:
+                self.proc.close(force=True)
+            except Exception:
+                pass
 
     def dump_buffer(self) -> str:
         with self._screen_lock:
             raw = self.screen.dump_raw()
         compressed = zlib.compress(raw, level=6)
-        return base64.b64encode(compressed).decode("ascii")
+        result = base64.b64encode(compressed).decode("ascii")
+        if is_debug_enabled():
+            dbg("dump_buffer: rows=%d cols=%d cursor=(%d,%d) raw_bytes=%d compressed=%d",
+                self.rows, self.cols, self.screen.cursor.x, self.screen.cursor.y,
+                len(raw), len(compressed))
+        return result
 
     def restore_buffer(self, encoded: str) -> None:
         try:
@@ -576,6 +721,10 @@ class TerminalSession:
             self._line_cache.clear()
             self._last_cursor_y = -1
             self._last_cursor_x = -1
+        if is_debug_enabled():
+            dbg("restore_buffer: rows=%d cols=%d cursor=(%d,%d) scrollback=%d",
+                self.rows, self.cols, self.screen.cursor.x, self.screen.cursor.y,
+                len(self._scrollback))
 
     def _build_line_runs(
         self,
@@ -587,8 +736,6 @@ class TerminalSession:
         sel_start: tuple[int, int] | None = None,
         sel_end: tuple[int, int] | None = None,
     ) -> list[tuple[str, str | None]]:
-        t = PerfTimer()
-
         cursor_affects = draw_cursor and y == cy
         selection_affects = False
         if sel_start is not None and sel_end is not None:
@@ -599,8 +746,6 @@ class TerminalSession:
 
         if not cursor_affects and not selection_affects:
             runs = self.screen.render_row_runs_to_text(y)
-            ms = t.elapsed_ms()
-            _line_runs_stats.record(ms)
             return runs
 
         cells = self.screen.render_row(y)
@@ -618,6 +763,12 @@ class TerminalSession:
             if selection_affects:
                 if self._copy_line_mode:
                     selected = True
+                elif self._copy_rect_mode:
+                    if min(y1, y2) <= y <= max(y1, y2):
+                        col_start = min(sx, ex)
+                        col_end = max(sx, ex)
+                        if col_start <= x <= col_end:
+                            selected = True
                 else:
                     if y1 == y2:
                         sel_x1, sel_x2 = (sx, ex) if sx <= ex else (ex, sx)
@@ -646,9 +797,6 @@ class TerminalSession:
         if run_chars:
             runs.append(("".join(run_chars), run_style))
 
-        ms = t.elapsed_ms()
-        _line_runs_stats.record(ms)
-
         return runs
 
     def build_render_text(
@@ -659,7 +807,6 @@ class TerminalSession:
         sel_end: tuple[int, int] | None = None,
         cursor_pos: tuple[int, int] | None = None,
     ) -> TerminalContent:
-        t = PerfTimer()
         with self._screen_lock:
             if cursor_pos is not None:
                 cy = max(0, min(self.rows - 1, cursor_pos[0]))
@@ -667,6 +814,19 @@ class TerminalSession:
             else:
                 cx = min(max(0, self.screen.cursor.x), max(0, self.cols - 1))
                 cy = min(max(0, self.screen.cursor.y), max(0, self.rows - 1))
+
+            if is_debug_enabled():
+                s_cx = self.screen.cursor.x
+                s_cy = self.screen.cursor.y
+                if s_cx != cx or s_cy != cy:
+                    dbg("build_render_text: CLAMPED cursor screen=(%d,%d)->render=(%d,%d) rows=%d cols=%d",
+                        s_cx, s_cy, cx, cy, self.rows, self.cols)
+                if not hasattr(self, '_render_count'):
+                    self._render_count = 0
+                self._render_count += 1
+                if self._render_count % 300 == 1:
+                    dbg("build_render_text: cursor=(%d,%d) draw=%s rows=%d cols=%d scrollback=%d",
+                        cx, cy, draw_cursor, self.rows, self.cols, len(self._scrollback))
 
             if self._last_cursor_y != cy or self._last_cursor_x != cx:
                 self._line_cache.pop(self._last_cursor_y, None)
@@ -708,8 +868,6 @@ class TerminalSession:
 
             self.screen.dirty.clear()
 
-        ms = t.elapsed_ms()
-        _render_stats.record(ms)
         return TerminalContent(lines, self.cols, self.rows)
 
     def get_plain_text(self) -> str:
@@ -841,24 +999,14 @@ class TerminalSession:
 
     @property
     def closed(self) -> bool:
+        if self._closed:
+            return True
+        if self.is_remote:
+            return False
+        now = time.monotonic()
+        if now - self._last_alive_check < 0.5:
+            return self._cached_closed
         is_alive = self.proc.isalive()
-        result = self._closed or not is_alive
-        return result
-
-
-def report_session_stats() -> None:
-    _feed_stats.report(interval_s=0.0)
-    _render_stats.report(interval_s=0.0)
-    _reader_feed_stats.report(interval_s=0.0)
-    _reader_read_stats.report(interval_s=0.0)
-    _select_stats.report(interval_s=0.0)
-    _line_runs_stats.report(interval_s=0.0)
-
-
-def reset_session_stats() -> None:
-    _feed_stats.reset()
-    _render_stats.reset()
-    _reader_feed_stats.reset()
-    _reader_read_stats.reset()
-    _select_stats.reset()
-    _line_runs_stats.reset()
+        self._cached_closed = not is_alive
+        self._last_alive_check = now
+        return self._cached_closed
