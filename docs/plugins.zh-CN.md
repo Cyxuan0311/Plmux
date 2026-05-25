@@ -108,9 +108,14 @@ register_command("greet", cmd_greet)
 | `mode_changed` | 输入模式变更 | `mode` |
 | `session_saved` | 会话状态保存到磁盘 | — |
 | `session_loaded` | 会话状态从磁盘恢复 | — |
+| `session_created` | 新会话创建 | `session_index` |
+| `session_killed` | 会话被杀死 | `session_index` |
 | `command_executed` | 执行 `:` 命令 | `command` |
 | `command_unknown` | 输入未识别的命令 | `command` |
 | `status_refresh` | 状态栏即将刷新 | — |
+| `client_connected` | 客户端连接到服务器 | — |
+| `client_disconnected` | 客户端断开与服务器的连接 | — |
+| `pane_resized` | 窗格大小调整 | `pane_index` |
 
 ### 注册钩子
 
@@ -180,6 +185,66 @@ register_status_item("cpu:12%", "bold #85c751 on #75715e", position="right")
 ### register_hook(name, fn)
 
 为钩子事件注册回调（参见上方钩子参考）。
+
+### register_format_var(name, fn)
+
+注册自定义格式变量，用于 `#{var_name}` 替换。处理函数接收 `FormatContext` 并返回字符串。
+
+```python
+from plmux.format import register_format_var, FormatContext
+
+def git_branch(ctx: FormatContext) -> str:
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            capture_output=True, text=True, timeout=1,
+        )
+        return result.stdout.strip() or ""
+    except Exception:
+        return ""
+
+register_format_var("git_branch", git_branch)
+```
+
+注册后，`#{git_branch}` 可用于状态栏格式字符串和命令输出。
+
+### 内置格式变量
+
+| 变量 | 说明 |
+|------|------|
+| `#{session_name}` | 当前会话名称 |
+| `#{session_index}` | 当前会话索引 |
+| `#{window_name}` | 当前窗口名称 |
+| `#{window_index}` | 当前窗口索引 |
+| `#{pane_index}` | 当前窗格索引 |
+| `#{pane_id}` | 窗格标识符 |
+| `#{pane_pid}` | 窗格进程 ID |
+| `#{pane_title}` | 窗格标题 |
+| `#{pane_width}` | 窗格宽度（列数） |
+| `#{pane_height}` | 窗格高度（行数） |
+| `#{pane_current_command}` | 前台命令名称 |
+| `#{pane_current_path}` | 当前工作目录 |
+| `#{host}` | 完整主机名 |
+| `#{host_short}` | 短主机名 |
+| `#{mode}` | 当前输入模式 |
+
+实现：[format.py](../plmux/format.py)
+
+## 配置驱动钩子
+
+除了通过 `register_hook()` 注册 Python 钩子外，还可以直接在 `config.json` 中定义 Shell 命令钩子：
+
+```json
+{
+  "hooks": {
+    "pane_created": ["echo '新窗格'"],
+    "app_started": ["notify-send 'plmux 已启动'"]
+  }
+}
+```
+
+完整的可用钩子列表和环境变量说明，参见[配置 - 钩子](configuration.zh-CN.md#hooks--钩子命令)。
 
 ## 与 tmux 插件系统对比
 

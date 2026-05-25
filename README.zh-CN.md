@@ -19,7 +19,7 @@
 
 
 
-一个轻量级的跨平台终端复用工具，灵感来源于 tmux，基于 Python、Rich 和 C 扩展构建。提供窗格分割、窗口管理、鼠标支持（滚轮滚动、点击切换焦点、拖拽调整大小）、复制模式、Vim 风格命令接口、动态状态栏（实时显示前台进程）、36 款内置主题、会话持久化、浏览器 Web 客户端，类 tmux 的插件扩展系统，以及配置热更新支持。
+一个轻量级的跨平台终端复用工具，灵感来源于 tmux，基于 Python、Rich 和 C 扩展构建。提供窗格分割、窗口管理、鼠标支持（滚轮滚动、点击切换焦点、拖拽调整大小）、复制模式、Vim 风格命令接口、动态状态栏（实时显示前台进程）、36 款内置主题、多会话支持、Server/Client 架构与 IPC 通信、会话持久化、浏览器 Web 客户端，类 tmux 的插件扩展系统，以及配置热更新支持。
 
 <div align="center">
   <img src="resource/demo.png" alt="plmux demo" />
@@ -37,13 +37,20 @@
 - **命令行**: Vim 风格的 `:` 命令接口，支持 Tab 补全
 - **动态状态栏**: 实时显示模式、窗口、窗格、前台命令（nano、btop、fzf 等）、时钟和主机名
 - **主题**: 36 款内置主题（dracula、gruvbox、tokyonight、catppuccin、nord、edge、doom-one、challenger-deep、moonlight、forest-night、snazzy 等）+ 用户自定义 JSON 主题
+- **多会话**: 在单个服务器中创建、切换、重命名和杀死多个会话；每个会话拥有独立的窗口和窗格
+- **Server/Client 架构**: 守护进程持有 PTY 资源；客户端通过 IPC 连接进行渲染和输入；支持多客户端同时连接
+- **IPC 协议**: 高性能二进制流式协议，C 扩展实现帧编解码（38K+ 帧/秒）
 - **热更新**: 配置和插件变更自动检测并应用，无需重启
 - **Web 客户端**: 通过 WebSocket 在浏览器中访问终端，C 扩展加速帧处理
 - **插件系统**: 类 tmux 的扩展钩子、自定义命令、键绑定和状态栏项
-- **C 扩展**: FastScreen（ANSI 解析/渲染）和 WebSocket 内核，用于高性能帧处理
+- **C 扩展**: FastScreen（ANSI 解析/渲染）、WebSocket 内核和 IPC 协议，用于高性能帧处理
 - **跨平台**: 支持 Windows、macOS 和 Linux
-- **会话持久化**: 自动保存和恢复布局
-- **守护进程模式**: 分离会话到后台运行，随时重新连接
+- **会话持久化**: 自动保存和恢复布局，支持多会话状态
+- **守护进程模式**: 分离会话到后台运行，随时重新连接；服务器在客户端断开后持续运行
+- **粘贴缓冲区**: 基于栈的粘贴缓冲区管理（设置、粘贴、保存、加载）
+- **环境变量继承**: 每会话独立环境变量，支持继承链（Server → Session → Pane）
+- **钩子系统**: 配置驱动的 Shell 命令钩子，由生命周期事件触发
+- **格式变量**: 类 tmux 的 `#{session_name}` 变量替换，用于状态栏和命令
 
 ## 快速开始
 
@@ -62,12 +69,14 @@ pip install -e .
 ### 使用
 
 ```bash
-plmux                  # 启动新会话
+plmux                  # 启动新会话（若守护进程未运行则自动启动）
 plmux ls               # 列出活动会话
 plmux lsw              # 列出窗口
 plmux lsw -p           # 列出窗口及窗格详情
 plmux attach           # 连接到已有会话
+plmux attach -t work   # 按名称连接到指定会话
 plmux new-session      # 创建分离的会话
+plmux new-session -n dev  # 创建命名的分离会话
 plmux kill-server      # 终止守护进程
 ```
 
@@ -96,7 +105,6 @@ plmux kill-server      # 终止守护进程
 | 分离会话 | 前缀 + `d` |
 | 进入命令行 | 前缀 + `:` |
 | 关闭窗口 | 前缀 + `&` |
-| 强制退出 | `Ctrl+Q` |
 
 ### 鼠标操作
 
@@ -175,12 +183,34 @@ plmux 内置 Web 服务器，支持通过浏览器访问终端。详见 [Web 客
 
 ## 架构
 
-plmux 在性能关键路径上使用 C 扩展，并采用模块化架构以提高可维护性：
+plmux 采用 Server/Client 架构，在性能关键路径上使用 C 扩展：
+
+### Server/Client 模型
+
+```
+Client (UI渲染+输入)  ←── IPC Unix Socket ──→  Server (PTY+广播)
+     │                                              │
+  ServerConnection                            ClientConnection
+  recv_init / recv_loop                       recv_loop / send_init
+  send_key / resize / command / detach        send_pane_output / state_update
+     │                                              │
+  RemoteTerminalSession                        PlmuxDaemon
+  (虚拟PTY, feed_remote)                       (TmuxServer + 数据泵 + 广播)
+```
+
+- **Server（守护进程）**: 持久化后台进程，持有所有 PTY 会话。泵送 PTY 输出并广播给所有连接的客户端。
+- **Client**: 通过 IPC 连接服务器，渲染终端输出，转发用户输入。支持多客户端同时连接。
+- **IPC 协议**: 二进制流式协议，5 字节头（4 字节长度 + 1 字节类型）。Server→Client 消息包括 `INIT`、`PANE_OUTPUT`、`STATE_UPDATE`、`PANE_CLOSED`、`BELL`。Client→Server 消息包括 `KEY`、`RESIZE`、`COMMAND`、`MOUSE`、`DETACH`。
+
+### C 扩展
 
 - **FastScreen**（`plmux/terminal/_c_extension/`）：ANSI 解析、屏幕状态管理和渲染 — 不可用时回退到纯 Python pyte 后端
 - **WebSocket 内核**（`plmux/web/_c_extension/`）：浏览器终端的帧解析和编码 — 不可用时回退到纯 Python WebSocket 实现
+- **IPC 协议**（`plmux/ipc/_c_extension/`）：Server/Client 通信的二进制帧编解码 — 不可用时回退到纯 Python 实现
 
-两个 C 扩展均为可选；plmux 在没有它们的情况下也能正常工作，使用 Python 回退实现。
+所有 C 扩展均为可选；plmux 在没有它们的情况下也能正常工作，使用 Python 回退实现。
+
+
 
 ## 许可证
 

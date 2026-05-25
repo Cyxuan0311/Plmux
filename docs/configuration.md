@@ -63,7 +63,8 @@ Implementation: [loader.py](../plmux/config/loader.py#L24-L28)
   "extensions": {
     "enabled": [],
     "search_paths": ["~/.config/plmux/extensions"]
-  }
+  },
+  "hooks": {}
 }
 ```
 
@@ -74,12 +75,13 @@ Implementation: [loader.py](../plmux/config/loader.py#L24-L28)
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `shell` | `list[str] \| null` | `null` | Shell command and arguments; defaults to system shell when `null` |
-| `env` | `dict[str, str]` | `{}` | Extra environment variables passed to child shells |
+| `env` | `dict[str, str]` | `{}` | Extra environment variables passed to child shells (inherited by all sessions) |
 | `theme` | `string` | `"default"` | Active theme name; see [Themes](themes.md) |
 | `ui` | object | — | UI rendering options (see below) |
 | `keys` | object | — | Key binding options (see below) |
 | `session` | object | — | Session persistence options (see below) |
 | `extensions` | object | — | Extension options (see below) |
+| `hooks` | object | — | Hook command options (see below) |
 
 Unknown top-level keys are preserved in `PlmuxConfig.extra` for experimentation.
 
@@ -147,6 +149,71 @@ For the full key binding reference including copy mode, command mode, and overla
 |-------|------|---------|-------------|
 | `enabled` | `list[str]` | `[]` | List of extension names to load |
 | `search_paths` | `list[str]` | `["~/.config/plmux/extensions"]` | Directories to search for extensions |
+
+### `hooks` — Hook Commands
+
+Hook commands are shell commands that run automatically when specific events occur. Each key is a hook name and the value is a list of shell commands to execute.
+
+```json
+{
+  "hooks": {
+    "pane_created": ["echo 'New pane created'"],
+    "app_started": ["notify-send 'plmux started'"],
+    "session_saved": ["echo 'Session saved' >> /tmp/plmux.log"]
+  }
+}
+```
+
+| Hook | Triggered When |
+|------|---------------|
+| `app_started` | Application has finished initializing |
+| `app_stopping` | Application is about to exit |
+| `pane_created` | A new pane is created |
+| `pane_closed` | A pane is closed |
+| `pane_focus_changed` | Focus moves to a different pane |
+| `window_created` | A new window is created |
+| `window_closed` | A window is closed |
+| `mode_changed` | Input mode changes |
+| `session_saved` | Session state is saved to disk |
+| `session_loaded` | Session state is restored from disk |
+| `session_created` | A new session is created |
+| `session_killed` | A session is killed |
+| `command_executed` | A `:` command is executed |
+| `command_unknown` | An unrecognized command is entered |
+| `status_refresh` | Status bar is about to refresh |
+| `client_connected` | A client connects to the server |
+| `client_disconnected` | A client disconnects from the server |
+| `pane_resized` | A pane is resized |
+
+When a hook command runs, the following environment variables are set:
+
+| Variable | Description |
+|----------|-------------|
+| `PLMUX_HOOK_NAME` | Name of the hook that triggered |
+| `PLMUX_PANE_INDEX` | Affected pane index (if applicable) |
+| `PLMUX_SESSION_INDEX` | Affected session index (if applicable) |
+| `PLMUX_CWD` | Current working directory (if available) |
+
+Hook commands run asynchronously in the background and do not block the main event loop.
+
+Implementation: [registry.py](../plmux/extensions/registry.py)
+
+### Environment Variable Inheritance
+
+Environment variables follow an inheritance chain: **Server → Session → Pane**.
+
+1. The top-level `env` field in `config.json` sets the base environment for all sessions
+2. Each session inherits a copy of the server's environment at creation time
+3. Session-specific variables can be set at runtime via the `:setenv` command
+4. New panes within a session inherit the session's current environment
+
+```
+config.json env  →  Session.env  →  Pane (spawned with merged env)
+                       ↑
+                 :setenv FOO bar  (adds/overrides at session level)
+```
+
+This means changes to a session's environment only affect panes created after the change, not existing panes.
 
 ## Hot Reload
 

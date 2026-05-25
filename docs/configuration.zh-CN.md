@@ -62,8 +62,9 @@
   "theme": "default",
   "extensions": {
     "enabled": [],
-    "search_paths": ["~/.config/plmux/extensions"]
-  }
+      "search_paths": ["~/.config/plmux/extensions"]
+   },
+   "hooks": {}
 }
 ```
 
@@ -74,12 +75,13 @@
 | 字段 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
 | `shell` | `list[str] \| null` | `null` | Shell 命令及参数；为 `null` 时使用系统默认 shell |
-| `env` | `dict[str, str]` | `{}` | 传递给子 shell 的额外环境变量 |
+| `env` | `dict[str, str]` | `{}` | 传递给子 shell 的额外环境变量（所有会话继承） |
 | `theme` | `string` | `"default"` | 当前主题名称；参见[主题](themes.zh-CN.md) |
 | `ui` | object | — | UI 渲染选项（见下文） |
 | `keys` | object | — | 键绑定选项（见下文） |
 | `session` | object | — | 会话持久化选项（见下文） |
 | `extensions` | object | — | 扩展选项（见下文） |
+| `hooks` | object | — | 钩子命令选项（见下文） |
 
 未识别的顶层键会保留在 `PlmuxConfig.extra` 中，便于试验新功能。
 
@@ -147,6 +149,71 @@
 |------|------|--------|------|
 | `enabled` | `list[str]` | `[]` | 要加载的扩展名称列表 |
 | `search_paths` | `list[str]` | `["~/.config/plmux/extensions"]` | 搜索扩展的目录列表 |
+
+### `hooks` — 钩子命令
+
+钩子命令是在特定事件发生时自动运行的 Shell 命令。每个键是钩子名称，值是要执行的 Shell 命令列表。
+
+```json
+{
+  "hooks": {
+    "pane_created": ["echo '新窗格已创建'"],
+    "app_started": ["notify-send 'plmux 已启动'"],
+    "session_saved": ["echo '会话已保存' >> /tmp/plmux.log"]
+  }
+}
+```
+
+| 钩子 | 触发时机 |
+|------|---------|
+| `app_started` | 应用完成初始化 |
+| `app_stopping` | 应用即将退出 |
+| `pane_created` | 新窗格创建 |
+| `pane_closed` | 窗格关闭 |
+| `pane_focus_changed` | 焦点切换到其他窗格 |
+| `window_created` | 新窗口创建 |
+| `window_closed` | 窗口关闭 |
+| `mode_changed` | 输入模式变更 |
+| `session_saved` | 会话状态保存到磁盘 |
+| `session_loaded` | 会话状态从磁盘恢复 |
+| `session_created` | 新会话创建 |
+| `session_killed` | 会话被杀死 |
+| `command_executed` | 执行 `:` 命令 |
+| `command_unknown` | 输入未识别的命令 |
+| `status_refresh` | 状态栏即将刷新 |
+| `client_connected` | 客户端连接到服务器 |
+| `client_disconnected` | 客户端断开与服务器的连接 |
+| `pane_resized` | 窗格大小调整 |
+
+钩子命令运行时，会设置以下环境变量：
+
+| 变量 | 说明 |
+|------|------|
+| `PLMUX_HOOK_NAME` | 触发的钩子名称 |
+| `PLMUX_PANE_INDEX` | 受影响的窗格索引（如适用） |
+| `PLMUX_SESSION_INDEX` | 受影响的会话索引（如适用） |
+| `PLMUX_CWD` | 当前工作目录（如可用） |
+
+钩子命令在后台异步运行，不会阻塞主事件循环。
+
+实现：[registry.py](../plmux/extensions/registry.py)
+
+### 环境变量继承
+
+环境变量遵循继承链：**Server → Session → Pane**。
+
+1. `config.json` 中的顶层 `env` 字段设置所有会话的基础环境
+2. 每个会话在创建时继承服务器环境的副本
+3. 会话级别的变量可以在运行时通过 `:setenv` 命令设置
+4. 会话内的新窗格继承该会话的当前环境
+
+```
+config.json env  →  Session.env  →  Pane（使用合并后的环境生成）
+                       ↑
+                  :setenv FOO bar  （在会话级别添加/覆盖）
+```
+
+这意味着对会话环境的更改仅影响更改后创建的窗格，不影响已有窗格。
 
 ## 热更新
 

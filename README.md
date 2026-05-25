@@ -18,7 +18,7 @@
 
 
 
-A lightweight, cross-platform terminal multiplexer inspired by tmux, built with Python, Rich, and C extensions. It provides pane splitting, window management, mouse support (scroll, click-to-focus, drag-to-resize), copy mode, a vim-style command interface, dynamic status bar with foreground process display, 36 built-in themes, session persistence, a browser-based web client, a tmux-like plugin extension system, and hot-reloadable configuration.
+A lightweight, cross-platform terminal multiplexer inspired by tmux, built with Python, Rich, and C extensions. It provides pane splitting, window management, mouse support (scroll, click-to-focus, drag-to-resize), copy mode, a vim-style command interface, dynamic status bar with foreground process display, 36 built-in themes, multi-session support, server/client architecture with IPC, session persistence, a browser-based web client, a tmux-like plugin extension system, and hot-reloadable configuration.
 
 <div align="center">
   <img src="resource/demo.png" alt="plmux demo" />
@@ -36,13 +36,20 @@ A lightweight, cross-platform terminal multiplexer inspired by tmux, built with 
 - **Command Line**: Vim-style `:` command interface with tab completion
 - **Dynamic Status Bar**: Real-time display of mode, window, pane, foreground command (nano, btop, fzf, etc.), clock, and hostname
 - **Themes**: 36 built-in themes (dracula, gruvbox, tokyonight, catppuccin, nord, edge, doom-one, challenger-deep, moonlight, forest-night, snazzy, and more) + user-defined JSON themes
+- **Multi-Session**: Create, switch, rename, and kill multiple sessions within a single server; each session has its own windows and panes
+- **Server/Client Architecture**: Daemon process holds PTY resources; clients connect via IPC for rendering and input; multiple clients can attach simultaneously
+- **IPC Protocol**: High-performance binary streaming protocol with C extension for frame encoding/decoding (38K+ frames/sec)
 - **Hot Reload**: Configuration and plugin changes are automatically detected and applied without restart
 - **Web Client**: Browser-based terminal access via WebSocket with C extension acceleration
 - **Plugin System**: tmux-like extension hooks, custom commands, key bindings, and status items
-- **C Extensions**: FastScreen (ANSI parsing/rendering) and WebSocket kernel for high-performance frame processing
+- **C Extensions**: FastScreen (ANSI parsing/rendering), WebSocket kernel, and IPC protocol for high-performance frame processing
 - **Cross-Platform**: Works on Windows, macOS, and Linux
-- **Session Persistence**: Auto-save and restore layouts
-- **Daemon Mode**: Detach and reattach sessions in the background
+- **Session Persistence**: Auto-save and restore layouts with multi-session state
+- **Daemon Mode**: Detach and reattach sessions in the background; server persists across client connections
+- **Paste Buffers**: Stack-based paste buffer management (set, paste, save, load)
+- **Environment Inheritance**: Per-session environment variables with inheritance chain (Server → Session → Pane)
+- **Hook System**: Config-driven shell command hooks triggered by lifecycle events
+- **Format Variables**: tmux-like `#{session_name}` variable substitution for status bar and commands
 
 ## Quick Start
 
@@ -61,12 +68,14 @@ pip install -e .
 ### Usage
 
 ```bash
-plmux                  # Start a new session
+plmux                  # Start a new session (launches daemon if not running)
 plmux ls               # List active sessions
 plmux lsw              # List windows
 plmux lsw -p           # List windows with pane details
 plmux attach           # Attach to an existing session
+plmux attach -t work   # Attach to a specific session by name
 plmux new-session      # Create a detached session
+plmux new-session -n dev  # Create a named detached session
 plmux kill-server      # Kill the running daemon
 ```
 
@@ -95,7 +104,6 @@ All key bindings are prefixed by **Ctrl+B** (configurable). See [Key Bindings](d
 | Detach session | Prefix + `d` |
 | Enter command line | Prefix + `:` |
 | Close window | Prefix + `&` |
-| Force quit | `Ctrl+Q` |
 
 ### Mouse Operations
 
@@ -174,12 +182,32 @@ See [Plugins](docs/plugins.md) for full documentation.
 
 ## Architecture
 
-plmux uses C extensions for performance-critical paths and a modular architecture for maintainability:
+plmux uses a server/client architecture with C extensions for performance-critical paths:
+
+### Server/Client Model
+
+```
+Client (UI + input)  ←── IPC Unix Socket ──→  Server (PTY + broadcast)
+     │                                              │
+  ServerConnection                            ClientConnection
+  recv_init / recv_loop                       recv_loop / send_init
+  send_key / resize / command / detach        send_pane_output / state_update
+     │                                              │
+  RemoteTerminalSession                        PlmuxDaemon
+  (virtual PTY, feed_remote)                   (TmuxServer + pump + broadcast)
+```
+
+- **Server (Daemon)**: A persistent background process that owns all PTY sessions. It pumps PTY output and broadcasts to all connected clients.
+- **Client**: Connects to the server via IPC, renders terminal output, and forwards user input. Multiple clients can attach simultaneously.
+- **IPC Protocol**: Binary streaming protocol with 5-byte headers (4-byte length + 1-byte type). Server→Client messages include `INIT`, `PANE_OUTPUT`, `STATE_UPDATE`, `PANE_CLOSED`, `BELL`. Client→Server messages include `KEY`, `RESIZE`, `COMMAND`, `MOUSE`, `DETACH`.
+
+### C Extensions
 
 - **FastScreen** (`plmux/terminal/_c_extension/`): ANSI parsing, screen state management, and rendering — falls back to a pure-Python pyte backend when unavailable
 - **WebSocket Kernel** (`plmux/web/_c_extension/`): Frame parsing and encoding for browser terminal — falls back to pure-Python WebSocket when unavailable
+- **IPC Protocol** (`plmux/ipc/_c_extension/`): Binary frame encoding/decoding for server/client communication — falls back to pure-Python implementation when unavailable
 
-Both C extensions are optional; plmux works without them using Python fallbacks.
+All C extensions are optional; plmux works without them using Python fallbacks.
 
 ## License
 

@@ -108,9 +108,14 @@ Hooks are callback functions that receive an `ExtensionContext` and are called w
 | `mode_changed` | Input mode changes | `mode` |
 | `session_saved` | Session state is saved to disk | — |
 | `session_loaded` | Session state is restored from disk | — |
+| `session_created` | A new session is created | `session_index` |
+| `session_killed` | A session is killed | `session_index` |
 | `command_executed` | A `:` command is executed | `command` |
 | `command_unknown` | An unrecognized command is entered | `command` |
 | `status_refresh` | Status bar is about to refresh | — |
+| `client_connected` | A client connects to the server | — |
+| `client_disconnected` | A client disconnects from the server | — |
+| `pane_resized` | A pane is resized | `pane_index` |
 
 ### Registering Hooks
 
@@ -180,6 +185,66 @@ register_status_item("cpu:12%", "bold #85c751 on #75715e", position="right")
 ### register_hook(name, fn)
 
 Register a callback for a hook event (see Hook Reference above).
+
+### register_format_var(name, fn)
+
+Register a custom format variable for use in `#{var_name}` substitution. The handler receives a `FormatContext` and returns a string.
+
+```python
+from plmux.format import register_format_var, FormatContext
+
+def git_branch(ctx: FormatContext) -> str:
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            capture_output=True, text=True, timeout=1,
+        )
+        return result.stdout.strip() or ""
+    except Exception:
+        return ""
+
+register_format_var("git_branch", git_branch)
+```
+
+After registering, `#{git_branch}` can be used in status bar format strings and command output.
+
+### Built-in Format Variables
+
+| Variable | Description |
+|----------|-------------|
+| `#{session_name}` | Current session name |
+| `#{session_index}` | Current session index |
+| `#{window_name}` | Current window name |
+| `#{window_index}` | Current window index |
+| `#{pane_index}` | Current pane index |
+| `#{pane_id}` | Pane identifier |
+| `#{pane_pid}` | Pane process ID |
+| `#{pane_title}` | Pane title |
+| `#{pane_width}` | Pane width in columns |
+| `#{pane_height}` | Pane height in rows |
+| `#{pane_current_command}` | Foreground command name |
+| `#{pane_current_path}` | Current working directory |
+| `#{host}` | Full hostname |
+| `#{host_short}` | Short hostname |
+| `#{mode}` | Current input mode |
+
+Implementation: [format.py](../plmux/format.py)
+
+## Config-Driven Hooks
+
+In addition to Python-based hooks via `register_hook()`, you can define shell command hooks directly in `config.json`:
+
+```json
+{
+  "hooks": {
+    "pane_created": ["echo 'New pane'"],
+    "app_started": ["notify-send 'plmux started'"]
+  }
+}
+```
+
+See [Configuration - Hooks](configuration.md#hooks--hook-commands) for the full list of available hooks and environment variables.
 
 ## Comparison with tmux Plugins
 
