@@ -77,7 +77,6 @@ def build_help_overlay(
     footer.append(" close", style="dim")
 
     if max_scroll > 0:
-        pct = int((scroll_offset / max_scroll) * 100) if max_scroll > 0 else 100
         footer.append(f"  [{scroll_offset + 1}-{min(scroll_offset + _VISIBLE_ROWS, total_rows)}/{total_rows}]", style="dim #665c54")
 
     inner = Table.grid(padding=(0, 1))

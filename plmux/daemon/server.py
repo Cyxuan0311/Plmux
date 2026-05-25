@@ -3,17 +3,12 @@
 from __future__ import annotations
 
 import asyncio
-import json
-import os
 import socket
-import struct
-import threading
-import time
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 from plmux.config.loader import load_config
 from plmux.config.schema import PlmuxConfig
-from plmux.daemon.state import ServerState, serialize_state, SessionHandle
+from plmux.daemon.state import ServerState
 from plmux.daemon.transport import (
     is_windows,
     find_free_port,
@@ -23,13 +18,12 @@ from plmux.daemon.transport import (
     remove_pid_file,
     remove_socket_file,
     socket_path,
-    send_fds,
 )
 from plmux.ipc.server_conn import ClientConnection
-from plmux.session.models import tree_to_json, tree_from_json
+from plmux.session.models import tree_to_json
 from plmux.terminal.session import TerminalSession
-from plmux.ui.theme import Theme, load_theme
-from plmux.workspace import TmuxServer, Session, Window
+from plmux.ui.theme import load_theme
+from plmux.workspace import TmuxServer
 
 
 class PlmuxDaemon:
@@ -435,7 +429,6 @@ async def run_daemon(daemon: PlmuxDaemon) -> None:
 
 async def run_server(state: ServerState) -> None:
     """Legacy entry point: creates TmuxServer from ServerState and runs daemon."""
-    import sys
     cfg = load_config()
     theme = load_theme(cfg.theme)
 

@@ -124,7 +124,6 @@ def _render_big_clock(time_str: str, fg: str, bg: str, max_rows: int, max_cols: 
     chars = list(time_str)
     num_chars = len(chars)
     total_cols = num_chars * digit_cols
-    total_rows = digit_rows + 2
 
     scale = 1
     if total_cols > max_cols - 4:

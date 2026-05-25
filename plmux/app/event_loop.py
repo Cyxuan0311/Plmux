@@ -10,7 +10,6 @@ import sys
 import threading
 import time
 from datetime import datetime
-from pathlib import Path
 from typing import Callable
 
 from blessed import Terminal
@@ -20,7 +19,6 @@ from rich.live import Live
 from plmux.config.loader import load_config
 from plmux.daemon import ServerState
 from plmux.debug_log import setup_debug_logging
-from plmux.terminal._c_extension import _fastscreen
 from plmux.extensions.registry import ExtensionContext, emit_hook, load_plugins, get_plugin_status_items, get_plugin_overlay, load_config_hooks
 from plmux.modes import AppContext
 from plmux.modes.dispatcher import dispatch_key
@@ -261,7 +259,6 @@ async def async_main(
 
     if remote_mode:
         from plmux.daemon.client import attach_to_server
-        from plmux.ipc.client_conn import ServerConnection
         from plmux.platform.shell import resolve_shell_argv
         from plmux.session.models import tree_from_json
         from plmux.ui.geometry import count_panes
@@ -569,7 +566,7 @@ async def async_main(
                 "pane_offset": pane_offset,
                 "pane_count": global_idx - pane_offset,
             })
-        cur_sess = ctx.ws._session()
+        # cur_sess = ctx.ws._session()
         save_session(
             cfg,
             tree=ctx.ws.tree,

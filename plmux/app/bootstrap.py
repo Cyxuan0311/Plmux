@@ -10,7 +10,7 @@ import sys
 
 from plmux import __version__
 from plmux.cli.commands import cmd_list_sessions, cmd_list_windows, cmd_kill_server, new_session, rename_window, rename_session
-from plmux.daemon import is_server_alive, run_server, is_windows, kill_server
+from plmux.daemon import is_server_alive, run_server, is_windows
 from plmux.daemon.server import run_daemon_from_config
 from plmux.state_bridge import serve_mode, spawn_server_subprocess
 

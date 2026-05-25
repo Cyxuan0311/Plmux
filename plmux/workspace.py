@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 import os
 import sys
 from pathlib import Path
-from typing import Callable, List, Optional
+from typing import Callable, Dict, List, Optional
 
 from plmux.config.schema import PlmuxConfig
 from plmux.session.models import SessionSnapshot, tree_from_json
@@ -527,14 +527,6 @@ class Session:
 
     def showenv(self) -> Dict[str, str]:
         return dict(self.env)
-        d, r, a, b = win.tree
-        if d == "row" and abs(r - 0.5) < 0.05:
-            return "even"
-        if d == "row" and r > 0.5:
-            return "main-vertical"
-        if d == "col" and r > 0.5:
-            return "main-horizontal"
-        return "even"
 
     def _build_layout(self, panes: list[int], name: str) -> Tree | None:
         n = len(panes)

@@ -216,7 +216,6 @@ def _render_pet(frame_lines: list[str], status: str, fg: str, bg: str, max_rows:
     for _ in range(top_pad):
         result.append("\n")
 
-    max_line_len = max(len(line) for line in frame_lines) if frame_lines else 0
     for line in frame_lines:
         padded = line.center(max_cols - 4) if max_cols > 4 else line
         result.append(padded + "\n", style=f"bold {fg}" if fg else "bold white")

@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import os
-import sys
 from typing import Any, Dict
 
 from plmux.daemon import is_server_alive, kill_server

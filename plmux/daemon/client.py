@@ -6,7 +6,7 @@ import asyncio
 import os
 import socket
 import struct
-from typing import List, Optional, Tuple
+from typing import List, Tuple
 
 from plmux.daemon.state import ServerState, deserialize_state
 from plmux.daemon.transport import (

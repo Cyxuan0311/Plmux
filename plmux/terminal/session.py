@@ -66,7 +66,7 @@ class TerminalContent:
             if i < len(self._lines) - 1:
                 yield Segment("\n", style=None)
         if len(self._lines) > 0:
-            last_line = self._lines[-1]
+            pass
     def __rich_measure__(self, console: Console, options):
         return Measurement(self._width, self._width)
 

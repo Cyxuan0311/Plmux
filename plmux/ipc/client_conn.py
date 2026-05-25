@@ -8,8 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-import struct
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Optional
 
 from plmux.ipc import (
     FrameReader,
@@ -19,12 +18,6 @@ from plmux.ipc import (
     MSG_STATE_UPDATE,
     MSG_PANE_CLOSED,
     MSG_BELL,
-    MSG_KEY,
-    MSG_RESIZE,
-    MSG_COMMAND,
-    MSG_MOUSE,
-    MSG_DETACH,
-    HEADER_SIZE,
     parse_pane_output,
     parse_pane_closed,
     parse_bell,

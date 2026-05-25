@@ -8,28 +8,19 @@ from __future__ import annotations
 
 import asyncio
 import json
-import struct
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Optional
 
 from plmux.ipc import (
     FrameReader,
     FrameWriter,
-    MSG_INIT,
-    MSG_PANE_OUTPUT,
-    MSG_STATE_UPDATE,
-    MSG_PANE_CLOSED,
-    MSG_BELL,
     MSG_KEY,
     MSG_RESIZE,
     MSG_COMMAND,
     MSG_MOUSE,
     MSG_DETACH,
-    HEADER_SIZE,
     parse_key,
     parse_resize,
-    parse_pane_closed,
 )
-from plmux.terminal.session import TerminalSession
 
 
 class ClientConnection:
