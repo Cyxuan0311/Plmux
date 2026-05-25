@@ -11,6 +11,7 @@ from typing import Any, Dict, List
 
 from plmux.config.schema import (
     ExtensionsConfig,
+    HooksConfig,
     KeysConfig,
     PlmuxConfig,
     SessionConfig,
@@ -83,6 +84,17 @@ def _parse_extensions(d: Dict[str, Any]) -> ExtensionsConfig:
     )
 
 
+def _parse_hooks(d: Dict[str, Any]) -> HooksConfig:
+    raw = dict(d)
+    parsed: Dict[str, List[str]] = {}
+    for hook_name, commands in raw.items():
+        if isinstance(commands, list):
+            parsed[hook_name] = [str(c) for c in commands]
+        elif isinstance(commands, str):
+            parsed[hook_name] = [commands]
+    return HooksConfig(hooks=parsed)
+
+
 def dict_to_config(data: Dict[str, Any]) -> PlmuxConfig:
     known = {
         "shell",
@@ -92,6 +104,7 @@ def dict_to_config(data: Dict[str, Any]) -> PlmuxConfig:
         "session",
         "theme",
         "extensions",
+        "hooks",
     }
     extra = {k: v for k, v in data.items() if k not in known}
     return PlmuxConfig(
@@ -102,6 +115,7 @@ def dict_to_config(data: Dict[str, Any]) -> PlmuxConfig:
         session=_parse_session(dict(data.get("session") or {})),
         theme=str(data.get("theme", "default")),
         extensions=_parse_extensions(dict(data.get("extensions") or {})),
+        hooks=_parse_hooks(dict(data.get("hooks") or {})),
         extra=extra,
     )
 

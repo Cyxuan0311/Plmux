@@ -43,7 +43,17 @@ class KeysConfig:
         "resize-up": ["K"],
         "resize-down": ["J"],
         "zoom": ["z"],
+        "synchronize-panes": ["S"],
+        "rotate-window": ["C-o"],
+        "clock-mode": ["t"],
+        "rectangle-toggle": ["C-v"],
+        "rename-window": [","],
         "command-line": [":"],
+        "next-session": [")"],
+        "prev-session": ["("],
+        "switch-session": ["s"],
+        "new-session": ["N"],
+        "rename-session": ["$"],
     })
 
 
@@ -65,6 +75,11 @@ class ExtensionsConfig:
 
 
 @dataclass
+class HooksConfig:
+    hooks: Dict[str, List[str]] = field(default_factory=dict)
+
+
+@dataclass
 class PlmuxConfig:
     shell: Optional[List[str]] = None
     env: Dict[str, str] = field(default_factory=dict)
@@ -73,4 +88,5 @@ class PlmuxConfig:
     session: SessionConfig = field(default_factory=SessionConfig)
     theme: str = "default"
     extensions: ExtensionsConfig = field(default_factory=ExtensionsConfig)
+    hooks: HooksConfig = field(default_factory=HooksConfig)
     extra: Dict[str, Any] = field(default_factory=dict)
