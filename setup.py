@@ -52,6 +52,20 @@ _ws_kernel_ext = Extension(
     library_dirs=library_dirs,
 )
 
+_ipc_protocol_ext = Extension(
+    "plmux.ipc._c_extension._ipc_protocol",
+    sources=[
+        "plmux/ipc/_c_extension/_ipc_protocol_module.c",
+        "plmux/ipc/_c_extension/_ipc_protocol_frame.c",
+    ],
+    depends=[
+        "plmux/ipc/_c_extension/_ipc_protocol.h",
+    ],
+    extra_compile_args=compile_args,
+    extra_link_args=link_args,
+    library_dirs=library_dirs,
+)
+
 setup(
-    ext_modules=[_fastscren_ext, _ws_kernel_ext],
+    ext_modules=[_fastscren_ext, _ws_kernel_ext, _ipc_protocol_ext],
 )
