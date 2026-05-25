@@ -1,0 +1,51 @@
+"""IPC protocol: binary framing and message types for Server/Client communication."""
+
+from plmux.ipc._c_extension import (
+    FrameReader,
+    encode_frame,
+    decode_frame,
+    MSG_INIT,
+    MSG_PANE_OUTPUT,
+    MSG_STATE_UPDATE,
+    MSG_PANE_CLOSED,
+    MSG_BELL,
+    MSG_KEY,
+    MSG_RESIZE,
+    MSG_COMMAND,
+    MSG_MOUSE,
+    MSG_DETACH,
+    HEADER_SIZE,
+)
+from plmux.ipc.protocol import (
+    FrameWriter,
+    MsgType,
+    parse_pane_output,
+    parse_key,
+    parse_resize,
+    parse_pane_closed,
+    parse_bell,
+)
+
+__all__ = [
+    "FrameReader",
+    "FrameWriter",
+    "MsgType",
+    "encode_frame",
+    "decode_frame",
+    "MSG_INIT",
+    "MSG_PANE_OUTPUT",
+    "MSG_STATE_UPDATE",
+    "MSG_PANE_CLOSED",
+    "MSG_BELL",
+    "MSG_KEY",
+    "MSG_RESIZE",
+    "MSG_COMMAND",
+    "MSG_MOUSE",
+    "MSG_DETACH",
+    "HEADER_SIZE",
+    "parse_pane_output",
+    "parse_key",
+    "parse_resize",
+    "parse_pane_closed",
+    "parse_bell",
+]

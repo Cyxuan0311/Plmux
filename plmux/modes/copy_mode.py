@@ -8,7 +8,7 @@ from plmux.modes import AppContext
 from plmux.platform.clipboard import copy_to_clipboard as _copy_to_clipboard
 
 
-def _extract_selected_text(s, a: tuple[int, int], b: tuple[int, int], scroll_offset: int = 0) -> str:
+def _extract_selected_text(s, a: tuple[int, int], b: tuple[int, int], scroll_offset: int = 0, rect_mode: bool = False) -> str:
     if a is None or b is None:
         return ""
     ay, ax = a
@@ -18,7 +18,19 @@ def _extract_selected_text(s, a: tuple[int, int], b: tuple[int, int], scroll_off
     sb_len = s.scrollback_len
     logical_ay = sb_len - scroll_offset + ay
     logical_by = sb_len - scroll_offset + by
-    lines: list[str] = []
+
+    if rect_mode:
+        col_start = min(ax, bx)
+        col_end = max(ax, bx)
+        lines: list[str] = []
+        for logical_y in range(max(0, logical_ay), min(s.total_lines(), logical_by + 1)):
+            plain = s.get_line_plain_text(logical_y)
+            start_x = max(0, min(len(plain), col_start))
+            end_x = max(0, min(len(plain), col_end + 1))
+            lines.append(plain[start_x:end_x])
+        return "\n".join(lines)
+
+    lines = []
     for logical_y in range(max(0, logical_ay), min(s.total_lines(), logical_by + 1)):
         plain = s.get_line_plain_text(logical_y)
         if logical_y == logical_ay and logical_y == logical_by:
@@ -85,8 +97,12 @@ def _ensure_cursor_visible(ctx: AppContext, s) -> None:
 
 
 def handle_copy_mode(key, ctx: AppContext) -> None:
-    if ctx.copy_pane is not None and 0 <= ctx.copy_pane < len(ctx.ws.sessions):
-        s = ctx.ws.sessions[ctx.copy_pane]
+    if ctx.copy_pane is not None:
+        win = ctx.ws._window()
+        if 0 <= ctx.copy_pane < len(win.panes):
+            s = win.panes[ctx.copy_pane]
+        else:
+            s = ctx.ws.active_session()
     else:
         s = ctx.ws.active_session()
 
@@ -188,7 +204,19 @@ def handle_copy_mode(key, ctx: AppContext) -> None:
 
     if key_char == "V":
         ctx.copy_line_mode = not ctx.copy_line_mode
+        if ctx.copy_line_mode:
+            ctx.copy_rect_mode = False
+            s.copy_rect_mode = False
         s.copy_line_mode = ctx.copy_line_mode
+        ctx.dirty = True
+        return
+
+    if key.name == "KEY_CTRL_V":
+        ctx.copy_rect_mode = not ctx.copy_rect_mode
+        if ctx.copy_rect_mode:
+            ctx.copy_line_mode = False
+            s.copy_line_mode = False
+        s.copy_rect_mode = ctx.copy_rect_mode
         ctx.dirty = True
         return
 
@@ -236,7 +264,7 @@ def handle_copy_mode(key, ctx: AppContext) -> None:
 
     if key_char == "y":
         if ctx.copy_anchor is not None and ctx.copy_cursor is not None:
-            text = _extract_selected_text(s, ctx.copy_anchor, ctx.copy_cursor, ctx.copy_scroll_offset)
+            text = _extract_selected_text(s, ctx.copy_anchor, ctx.copy_cursor, ctx.copy_scroll_offset, rect_mode=ctx.copy_rect_mode)
             _copy_to_clipboard(text)
         _exit_copy_mode(ctx, s)
         return
@@ -406,11 +434,15 @@ def _exit_copy_mode(ctx: AppContext, s) -> None:
     ctx.copy_search_active = False
     ctx.copy_search_matches = []
     ctx.copy_search_match_idx = -1
+    ctx.copy_line_mode = False
+    ctx.copy_rect_mode = False
     s.copy_sel_start = None
     s.copy_sel_end = None
     s.copy_cursor_pos = None
     s.copy_scroll_offset = 0
     s.copy_search_matches = None
+    s.copy_line_mode = False
+    s.copy_rect_mode = False
     s._line_cache.clear()
     s._last_cursor_y = -1
     s._last_cursor_x = -1

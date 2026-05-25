@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from typing import List, Optional, Tuple
 
+from plmux.debug_log import win_dbg
 from plmux.platform.shell import (
     ensure_interactive_shell,
 )
@@ -36,10 +37,18 @@ class _WindowsPtyProcess:
 
         if _WinPtyProcess is not None:
             cmd = " ".join([f'"{a}"' if " " in a else a for a in argv])
+            spawn_env = dict(env)
+            spawn_env["PYWINPTY_BACKEND"] = "1"
             try:
-                self._proc = _WinPtyProcess.spawn(cmd, env=env, cwd=cwd)
+                self._proc = _WinPtyProcess.spawn(cmd, env=spawn_env, cwd=cwd)
             except TypeError:
                 self._proc = _WinPtyProcess.spawn(cmd)
+            except Exception:
+                spawn_env.pop("PYWINPTY_BACKEND", None)
+                try:
+                    self._proc = _WinPtyProcess.spawn(cmd, env=spawn_env, cwd=cwd)
+                except TypeError:
+                    self._proc = _WinPtyProcess.spawn(cmd)
             self.pid = self._proc.pid
         else:
             import subprocess
@@ -51,7 +60,7 @@ class _WindowsPtyProcess:
                 stderr=subprocess.STDOUT,
                 env=env,
                 cwd=cwd,
-                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW,
             )
             self.pid = self._subprocess.pid or 0
 
@@ -121,13 +130,15 @@ class _WindowsPtyProcess:
         pass
 
     def setwinsize(self, rows: int, cols: int) -> None:
+        old_rows, old_cols = self._rows, self._cols
         self._rows = rows
         self._cols = cols
         if self._proc is not None:
             try:
                 self._proc.setwinsize(rows, cols)
-            except Exception:
-                pass
+                win_dbg("setwinsize(%d,%d) OK (was %dx%d)", rows, cols, old_rows, old_cols)
+            except Exception as e:
+                win_dbg("setwinsize(%d,%d) FAILED: %s", rows, cols, e)
 
     def close(self, force: bool = False) -> None:
         self._closed = True

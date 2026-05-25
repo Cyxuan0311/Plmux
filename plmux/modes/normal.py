@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from plmux.input.keymap import send_keystroke_to_session
+from plmux.input.keymap import send_keystroke_to_session, send_keystroke_to_sessions
 from plmux.modes import AppContext
+from plmux.ui.geometry import pane_indices
 
 
 def handle_normal_mode(key, ctx: AppContext) -> None:
@@ -12,12 +13,22 @@ def handle_normal_mode(key, ctx: AppContext) -> None:
         ctx.dirty = True
         return
 
-    if not key.is_sequence and str(key) == "\x11":
-        ctx.hard_quit_requested = True
-        ctx.running = False
+    if ctx.clock_mode_pane is not None and ctx.ws.focus_pane == ctx.clock_mode_pane:
+        ctx.clock_mode_pane = None
+        ctx.dirty = True
         return
 
-    if not key.is_sequence and str(key) == "\x04":
+    if ctx.pet_mode_pane is not None and ctx.ws.focus_pane == ctx.pet_mode_pane:
+        ctx.pet_mode_pane = None
+        ctx.pet_type = ""
+        ctx.pet_frame = 0
+        ctx.dirty = True
         return
 
-    send_keystroke_to_session(ctx.ws.active_session(), key)
+    if ctx.broadcast_enabled:
+        win = ctx.ws._window()
+        indices = pane_indices(win.tree)
+        sessions = [win.panes[i] for i in indices if i < len(win.panes)]
+        send_keystroke_to_sessions(sessions, key)
+    else:
+        send_keystroke_to_session(ctx.ws.active_session(), key)

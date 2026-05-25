@@ -8,6 +8,8 @@ import sys
 import threading
 from typing import Any
 
+from plmux.debug_log import dbg, win_dbg
+
 try:
     import termios
 except ImportError:
@@ -69,20 +71,28 @@ class PtyHandle:
         if self._win and self._sock is not None:
             payload = struct.pack("!ii", rows, cols)
             self._send_command(0x02, payload)
+            win_dbg("PtyHandle.setwinsize(%d,%d) via sock", rows, cols)
             return
         if self._win and self._proc is not None:
             try:
                 self._proc.setwinsize(rows, cols)
+                win_dbg("PtyHandle.setwinsize(%d,%d) via _proc OK", rows, cols)
             except OSError:
-                pass
+                win_dbg("PtyHandle.setwinsize(%d,%d) via _proc FAILED (OSError)", rows, cols)
+            return
+        if self._win:
+            win_dbg("PtyHandle.setwinsize(%d,%d) NOOP (win, no sock, no _proc)", rows, cols)
             return
         try:
             winsize = struct.pack("HHHH", rows, cols, 0, 0)
             import fcntl as _f
             if termios is not None:
                 _f.ioctl(self._fd, termios.TIOCSWINSZ, winsize)
-        except (OSError, ImportError):
-            pass
+                dbg("PtyHandle.setwinsize(%d,%d) via ioctl OK", rows, cols)
+            else:
+                dbg("PtyHandle.setwinsize(%d,%d) NOOP (termios is None)", rows, cols)
+        except (OSError, ImportError) as e:
+            dbg("PtyHandle.setwinsize(%d,%d) FAILED: %s", rows, cols, e)
 
     def close(self, force: bool = False) -> None:
         if self._closed:

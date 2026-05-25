@@ -45,6 +45,8 @@ def handle_layout_list_mode(key, ctx: AppContext) -> None:
         if idx < n:
             tpl = LAYOUT_TEMPLATES[idx]
             ctx.ws.apply_layout_template(tpl.name)
+            if ctx.send_remote_command:
+                ctx.send_remote_command({"action": "apply_layout_template", "name": tpl.name})
             ctx.mode = "normal"
         ctx.dirty = True
     else:

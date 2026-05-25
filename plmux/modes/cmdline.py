@@ -93,12 +93,72 @@ def handle_cmdline_mode(key, ctx: AppContext) -> None:
             ctx._pending_web_stop = True
         if res.reload_config:
             _do_reload_config(ctx)
+        if res.toggle_broadcast is not None:
+            if res.toggle_broadcast and not ctx.broadcast_enabled:
+                ctx.broadcast_enabled = True
+            elif not res.toggle_broadcast and ctx.broadcast_enabled:
+                ctx.broadcast_enabled = False
+            elif res.toggle_broadcast and ctx.broadcast_enabled:
+                ctx.broadcast_enabled = False
+        if res.toggle_clock_mode:
+            if ctx.clock_mode_pane is not None:
+                ctx.clock_mode_pane = None
+            else:
+                ctx.clock_mode_pane = ctx.ws.focus_pane
+        if res.pet_mode is not None:
+            if res.pet_mode == "off":
+                ctx.pet_mode_pane = None
+                ctx.pet_type = ""
+                ctx.pet_frame = 0
+            else:
+                ctx.pet_mode_pane = ctx.ws.focus_pane
+                ctx.pet_type = res.pet_mode
+                ctx.pet_frame = 0
+        if res.toggle_rect_mode:
+            if ctx.mode == "copy":
+                ctx.copy_rect_mode = not ctx.copy_rect_mode
+                if ctx.copy_rect_mode:
+                    ctx.copy_line_mode = False
+                    s = ctx.ws.active_session()
+                    s.copy_line_mode = False
+                    s.copy_rect_mode = True
+                else:
+                    s = ctx.ws.active_session()
+                    s.copy_rect_mode = False
+        if res.rename_window is not None:
+            ctx.ws.rename_window(res.rename_window)
+            if ctx.send_remote_command:
+                ctx.send_remote_command({"action": "rename_window", "name": res.rename_window})
+        if res.rename_session is not None:
+            ctx.ws.rename_session(res.rename_session)
+            if ctx.send_remote_command:
+                ctx.send_remote_command({"action": "rename_session", "name": res.rename_session})
+        if res.new_session_name is not None:
+            ctx.ws.new_session(res.new_session_name)
+            if ctx.send_remote_command:
+                ctx.send_remote_command({"action": "new_session", "name": res.new_session_name})
+        if res.kill_session_idx is not None:
+            ctx.ws.kill_session(res.kill_session_idx)
+            if ctx.send_remote_command:
+                ctx.send_remote_command({"action": "kill_session", "index": res.kill_session_idx})
+        if res.switch_session is not None:
+            idx = res.switch_session
+            if 0 <= idx < len(ctx.ws.sessions_list):
+                ctx.ws.switch_session(idx)
+                if ctx.send_remote_command:
+                    ctx.send_remote_command({"action": "switch_session", "index": idx})
         if res.plugin_overlay:
             ctx.mode = res.plugin_overlay
             from plmux.extensions.registry import get_plugin_mode_handler
             handler = get_plugin_mode_handler(res.plugin_overlay)
             if handler and hasattr(handler, "_on_enter"):
                 handler._on_enter(ctx)
+        if res.remote_command and ctx.send_remote_command:
+            cmd = res.remote_command
+            if cmd.get("action") == "split" and "rows" not in cmd:
+                cmd["rows"] = ctx.content_rows
+                cmd["cols"] = ctx.content_cols
+            ctx.send_remote_command(cmd)
         ctx.dirty = True
     elif key.name in ("KEY_BACKSPACE", "KEY_DELETE"):
         ctx.cmd_buffer = ctx.cmd_buffer[:-1]

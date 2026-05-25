@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable
 
 
 @dataclass
@@ -17,8 +17,10 @@ class AppContext:
     mode: str = "normal"
     cmd_buffer: str = ""
     help_tab: int = 0
+    help_scroll_offset: int = 0
     theme_list_cursor: int = 0
     session_list_cursor: int = 0
+    session_list_tab: int = 0
     plugin_list_cursor: int = 0
     layout_list_cursor: int = 0
     _pending_web_port: int = 0
@@ -31,6 +33,7 @@ class AppContext:
     copy_cursor: tuple[int, int] | None = None
     copy_pane: int | None = None
     copy_line_mode: bool = False
+    copy_rect_mode: bool = False
     copy_scroll_offset: int = 0
     copy_search_query: str = ""
     copy_search_direction: str = ""
@@ -53,6 +56,12 @@ class AppContext:
 
     clock_str: str = ""
 
+    clock_mode_pane: int | None = None
+
+    pet_mode_pane: int | None = None
+    pet_type: str = ""
+    pet_frame: int = 0
+
     sigint_flagged: bool = False
     hard_quit_requested: bool = False
     completion_hints: str = ""
@@ -60,6 +69,11 @@ class AppContext:
     theme_search_query: str = ""
 
     plugin_state: dict = field(default_factory=dict)
+
+    send_remote_command: Callable[[dict], None] | None = None
+
+    content_rows: int = 24
+    content_cols: int = 80
 
     def mark_dirty(self) -> None:
         self.dirty = True
