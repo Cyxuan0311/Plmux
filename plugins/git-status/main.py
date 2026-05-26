@@ -9,9 +9,19 @@ import os
 import subprocess
 import time
 
-from plmux.extensions import register_hook, register_status_item, ExtensionContext
+from plmux.extensions import register_hook, register_status_item, ExtensionContext, plugin_metadata
 
 _STATUS_PREFIX = "git:"
+
+plugin_metadata(
+    name="git-status",
+    version="1.2.0",
+    author="plmux",
+    description="Show git branch & dirty state in status bar",
+    config_schema={
+        "cache_ttl": {"type": "float", "default": 3.0, "description": "Cache TTL in seconds"},
+    },
+)
 _STATUS_STYLE_CLEAN = "bold #85c751 on #75715e"
 _STATUS_STYLE_DIRTY = "bold #f92672 on #75715e"
 _STATUS_STYLE_NOGIT = "dim white on #75715e"

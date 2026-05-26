@@ -7,11 +7,12 @@ with a tree view on the left and a file preview on the right.
 from __future__ import annotations
 
 import os
+import threading
 import time
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, List
+from typing import Any, List, Optional
 
 from rich import box
 from rich.cells import cell_len
@@ -20,6 +21,7 @@ from rich.table import Table
 from rich.text import Text
 
 from plmux.extensions import (
+    plugin_metadata,
     register_command,
     register_overlay,
     register_mode_handler,
@@ -28,6 +30,17 @@ from plmux.input.commands import CommandResult
 
 _MODE_NAME = "file_browser"
 _OVERLAY_NAME = "file_browser"
+
+plugin_metadata(
+    name="file-browser",
+    version="1.1.0",
+    author="plmux",
+    description="Interactive file browser overlay with tree view and file preview",
+    config_schema={
+        "show_hidden": {"type": "bool", "default": False, "description": "Show hidden files"},
+        "preview_max_lines": {"type": "int", "default": 80, "description": "Max lines in file preview"},
+    },
+)
 
 _BINARY_EXTENSIONS = frozenset({
     ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".ico", ".webp", ".svg",
@@ -57,6 +70,8 @@ _PREVIEW_MAX_LINES = 80
 _DIR_CACHE_TTL = 2.0
 _DIR_STAT_CACHE_TTL = 30.0
 _PREVIEW_CACHE_SIZE = 64
+_PREVIEW_DEBOUNCE_MS = 40
+_SCROLL_DEBOUNCE_MS = 16
 
 _DIR_MARKER_OPEN = "\u25BC"
 _DIR_MARKER_CLOSED = "\u25B6"
@@ -68,6 +83,67 @@ _ICON_DIR = "\u25B8"
 _ICON_DIR_OPEN = "\u25BE"
 _ICON_FILE = " "
 _ICON_LINK = "@"
+
+_FILE_TYPE_TAGS: dict[str, tuple[str, str]] = {
+    ".py": ("py", "#3572A5"),
+    ".js": ("js", "#f1e05a"),
+    ".ts": ("ts", "#3178c6"),
+    ".tsx": ("tsx", "#3178c6"),
+    ".jsx": ("jsx", "#61dafb"),
+    ".rs": ("rs", "#dea584"),
+    ".go": ("go", "#00add8"),
+    ".java": ("java", "#b07219"),
+    ".rb": ("rb", "#cc342d"),
+    ".c": ("c", "#555555"),
+    ".h": ("h", "#777"),
+    ".cpp": ("c++", "#f34b7d"),
+    ".hpp": ("h++", "#f34b7d"),
+    ".cs": ("cs", "#178600"),
+    ".md": ("md", "#519aba"),
+    ".json": ("json", "#cbcb41"),
+    ".yaml": ("yml", "#cb171e"),
+    ".yml": ("yml", "#cb171e"),
+    ".toml": ("toml", "#9c4221"),
+    ".cfg": ("cfg", "#6a9955"),
+    ".ini": ("ini", "#6a9955"),
+    ".sh": ("sh", "#89e051"),
+    ".bash": ("sh", "#89e051"),
+    ".zsh": ("zsh", "#89e051"),
+    ".html": ("html", "#e37933"),
+    ".css": ("css", "#563d7c"),
+    ".scss": ("scss", "#c6538c"),
+    ".sql": ("sql", "#e38c00"),
+    ".xml": ("xml", "#e37933"),
+    ".env": ("env", "#ecd53f"),
+    ".lock": ("lock", "#6a9955"),
+    ".log": ("log", "#888"),
+    ".txt": ("txt", "#888"),
+    ".lua": ("lua", "#000080"),
+    ".vim": ("vim", "#019833"),
+    ".hs": ("hs", "#5e5086"),
+    ".swift": ("swift", "#f05138"),
+    ".kt": ("kt", "#a97bff"),
+    ".dart": ("dart", "#00b4ab"),
+    ".r": ("r", "#276dc3"),
+    ".php": ("php", "#4f5d95"),
+    ".pl": ("pl", "#0298c3"),
+    ".ex": ("ex", "#6e4a7e"),
+    ".erl": ("erl", "#b83998"),
+    ".scala": ("scala", "#c22d40"),
+    ".diff": ("diff", "#5c8a5c"),
+    ".patch": ("patch", "#5c8a5c"),
+    ".csv": ("csv", "#e38c00"),
+    ".tf": ("tf", "#7b42bc"),
+    ".proto": ("proto", "#3a7ca5"),
+    ".graphql": ("gql", "#e535ab"),
+}
+
+_SPECIAL_FILE_TAGS: dict[str, tuple[str, str]] = {
+    "makefile": ("make", "#6a9955"),
+    "dockerfile": ("dock", "#6a9955"),
+    "license": ("doc", "#519aba"),
+    "readme": ("doc", "#519aba"),
+}
 
 
 @dataclass
@@ -81,11 +157,34 @@ class FileNode:
     expanded: bool = False
     loaded: bool = False
     children: List["FileNode"] = field(default_factory=list)
+    tag: tuple[str, str] = ("", "")
+
+    def __post_init__(self) -> None:
+        if not self.is_dir and self.tag == ("", ""):
+            self.tag = _compute_file_tag(self.name)
 
 
 _dir_cache: dict[str, tuple[float, list[FileNode]]] = {}
 _dir_stat_cache: dict[str, tuple[float, tuple[int, int, int]]] = {}
 _preview_cache: OrderedDict[str, tuple[str, bool]] = OrderedDict()
+_dir_stats_bg_results: dict[str, tuple[int, int, int]] = {}
+_dir_stats_bg_lock = threading.Lock()
+
+
+def _compute_file_tag(name: str) -> tuple[str, str]:
+    suffix = Path(name).suffix.lower()
+    tag = _FILE_TYPE_TAGS.get(suffix)
+    if tag:
+        return tag
+    lower = name.lower()
+    if lower.startswith(".git"):
+        return ("git", "#f05032")
+    special = _SPECIAL_FILE_TAGS.get(lower)
+    if special:
+        return special
+    if lower.startswith("readme"):
+        return ("doc", "#519aba")
+    return ("", "")
 
 
 def _format_size(size: int) -> str:
@@ -105,7 +204,7 @@ def _truncate_text(text: str, max_width: int, ellipsis: str = "...") -> str:
     if max_width <= ellipsis_len:
         return text[:max_width]
     target = max_width - ellipsis_len
-    result = []
+    result: list[str] = []
     result_len = 0
     for ch in text:
         ch_len = cell_len(ch)
@@ -149,18 +248,10 @@ def _format_perms(mode: int) -> str:
     return p
 
 
-def _compute_dir_stats(path: str) -> tuple[int, int, int]:
-    now = time.monotonic()
-    cached = _dir_stat_cache.get(path)
-    if cached is not None:
-        ts, stats = cached
-        if now - ts < _DIR_STAT_CACHE_TTL:
-            return stats
-
+def _compute_dir_stats_bg(path: str) -> None:
     total_dirs = 0
     total_files = 0
     total_size = 0
-
     try:
         for root, dirs, files in os.walk(path):
             total_dirs += len(dirs)
@@ -172,10 +263,24 @@ def _compute_dir_stats(path: str) -> tuple[int, int, int]:
                     pass
     except OSError:
         pass
+    with _dir_stats_bg_lock:
+        _dir_stats_bg_results[path] = (total_dirs, total_files, total_size)
+        _dir_stat_cache[path] = (time.monotonic(), (total_dirs, total_files, total_size))
 
-    result = (total_dirs, total_files, total_size)
-    _dir_stat_cache[path] = (now, result)
-    return result
+
+def _get_dir_stats(path: str) -> Optional[tuple[int, int, int]]:
+    now = time.monotonic()
+    cached = _dir_stat_cache.get(path)
+    if cached is not None:
+        ts, stats = cached
+        if now - ts < _DIR_STAT_CACHE_TTL:
+            return stats
+    with _dir_stats_bg_lock:
+        bg = _dir_stats_bg_results.get(path)
+        if bg is not None:
+            return bg
+    threading.Thread(target=_compute_dir_stats_bg, args=(path,), daemon=True).start()
+    return None
 
 
 def _list_dir(path: str) -> list[FileNode]:
@@ -191,7 +296,7 @@ def _list_dir(path: str) -> list[FileNode]:
     except (PermissionError, OSError):
         return []
 
-    nodes = []
+    nodes: list[FileNode] = []
     for entry in entries:
         name = entry.name
         if name.startswith(".") and name not in (".env",):
@@ -294,7 +399,7 @@ def _read_preview(path: str) -> tuple[str, bool]:
 
     try:
         with open(path, "r", errors="replace") as f:
-            lines = []
+            lines: list[str] = []
             for i, line in enumerate(f):
                 if i >= _PREVIEW_MAX_LINES:
                     lines.append("... (truncated)")
@@ -317,18 +422,21 @@ def _get_dir_info(path: str) -> str:
     try:
         st = os.stat(path)
         perms = _format_perms(st.st_mode)
-        r_dirs, r_files, r_size = _compute_dir_stats(path)
-        return (
-            f"{perms}\n\n"
-            f"Directories:  {r_dirs}\n"
-            f"Files:        {r_files}\n"
-            f"Total size:   {_format_size(r_size)}"
-        )
+        stats = _get_dir_stats(path)
+        if stats is not None:
+            r_dirs, r_files, r_size = stats
+            return (
+                f"{perms}\n\n"
+                f"Directories:  {r_dirs}\n"
+                f"Files:        {r_files}\n"
+                f"Total size:   {_format_size(r_size)}"
+            )
+        return f"{perms}\n\nComputing directory stats..."
     except OSError:
         return ""
 
 
-def _cmd_file_browser(ws, args: list[str]) -> CommandResult:
+def _cmd_file_browser(ws: Any, args: list[str]) -> CommandResult:
     return CommandResult(plugin_overlay=_MODE_NAME)
 
 
@@ -346,13 +454,16 @@ def _on_enter(ctx: Any) -> None:
         "preview_path": None,
         "preview_text": "",
         "preview_is_text": False,
+        "_cached_expanded": frozenset(),
+        "_last_preview_time": 0.0,
+        "_pending_preview_node": None,
+        "visible_rows": 20,
     }
     if flat:
-        _update_preview(ctx, flat[0][0])
+        _update_preview(ctx.plugin_state, flat[0][0])
 
 
-def _update_preview(ctx: Any, node: FileNode) -> None:
-    state = ctx.plugin_state
+def _update_preview(state: dict, node: FileNode) -> None:
     if node.is_dir:
         info = _get_dir_info(node.path)
         state["preview_path"] = node.path
@@ -363,6 +474,26 @@ def _update_preview(ctx: Any, node: FileNode) -> None:
         state["preview_path"] = node.path
         state["preview_text"] = text
         state["preview_is_text"] = is_text
+
+
+def _schedule_preview(state: dict, node: FileNode) -> None:
+    now = time.monotonic()
+    last = state.get("_last_preview_time", 0.0)
+    elapsed_ms = (now - last) * 1000
+    if elapsed_ms >= _PREVIEW_DEBOUNCE_MS:
+        _update_preview(state, node)
+        state["_last_preview_time"] = now
+        state["_pending_preview_node"] = None
+    else:
+        state["_pending_preview_node"] = node
+
+
+def _flush_pending_preview(state: dict) -> None:
+    node = state.get("_pending_preview_node")
+    if node is not None:
+        _update_preview(state, node)
+        state["_last_preview_time"] = time.monotonic()
+        state["_pending_preview_node"] = None
 
 
 def _get_flat(state: dict) -> list[tuple[FileNode, str]]:
@@ -378,7 +509,15 @@ def _get_flat(state: dict) -> list[tuple[FileNode, str]]:
     return flat
 
 
-def handle_file_browser_mode(key, ctx: Any) -> None:
+def _rebuild_flat(state: dict, expanded: set) -> list[tuple[FileNode, str]]:
+    root_nodes = state.get("root_nodes", [])
+    flat = _flatten_tree_with_prefix(root_nodes, expanded)
+    state["flat_cache"] = flat
+    state["_cached_expanded"] = frozenset(expanded)
+    return flat
+
+
+def handle_file_browser_mode(key: Any, ctx: Any) -> None:
     state = ctx.plugin_state
     if not state:
         ctx.mode = "normal"
@@ -404,6 +543,7 @@ def handle_file_browser_mode(key, ctx: Any) -> None:
 
     cursor = max(0, min(cursor, len(flat) - 1))
     current, _ = flat[cursor]
+    need_rebuild = False
 
     if name in ("KEY_UP",) or ch == "k":
         cursor = max(0, cursor - 1)
@@ -428,54 +568,47 @@ def handle_file_browser_mode(key, ctx: Any) -> None:
                 expanded.add(current.path)
                 current.expanded = True
                 _ensure_children(current)
-            flat = _flatten_tree_with_prefix(state.get("root_nodes", []), expanded)
-            state["flat_cache"] = flat
-            state["_cached_expanded"] = frozenset(expanded)
-            cursor = max(0, min(cursor, len(flat) - 1))
+            need_rebuild = True
     elif ch == "l" and current.is_dir:
         if current.path not in expanded:
             expanded.add(current.path)
             current.expanded = True
             _ensure_children(current)
-            flat = _flatten_tree_with_prefix(state.get("root_nodes", []), expanded)
-            state["flat_cache"] = flat
-            state["_cached_expanded"] = frozenset(expanded)
+            need_rebuild = True
     elif ch == "h":
         if current.is_dir and current.path in expanded:
             expanded.discard(current.path)
             current.expanded = False
-            flat = _flatten_tree_with_prefix(state.get("root_nodes", []), expanded)
-            state["flat_cache"] = flat
-            state["_cached_expanded"] = frozenset(expanded)
-            cursor = max(0, min(cursor, len(flat) - 1))
+            need_rebuild = True
         else:
             parent_path = os.path.dirname(current.path)
             for i, (node, _) in enumerate(flat):
                 if node.path == parent_path and node.is_dir and node.path in expanded:
                     expanded.discard(node.path)
                     node.expanded = False
-                    flat = _flatten_tree_with_prefix(state.get("root_nodes", []), expanded)
-                    state["flat_cache"] = flat
-                    state["_cached_expanded"] = frozenset(expanded)
+                    need_rebuild = True
                     cursor = i
                     break
     elif ch == "r":
         _dir_cache.clear()
         _dir_stat_cache.clear()
         _preview_cache.clear()
+        with _dir_stats_bg_lock:
+            _dir_stats_bg_results.clear()
         root_path = state.get("root_path", os.getcwd())
         root_nodes = _list_dir(root_path)
         state["root_nodes"] = root_nodes
-        flat = _flatten_tree_with_prefix(root_nodes, expanded)
-        state["flat_cache"] = flat
-        state["_cached_expanded"] = frozenset(expanded)
+        need_rebuild = True
+
+    if need_rebuild:
+        flat = _rebuild_flat(state, expanded)
         cursor = max(0, min(cursor, len(flat) - 1))
 
     state["cursor"] = cursor
     state["expanded"] = frozenset(expanded)
 
     if 0 <= cursor < len(flat):
-        _update_preview(ctx, flat[cursor][0])
+        _schedule_preview(state, flat[cursor][0])
 
     ctx.dirty = True
 
@@ -483,71 +616,59 @@ def handle_file_browser_mode(key, ctx: Any) -> None:
 handle_file_browser_mode._on_enter = _on_enter
 
 
-def _file_type_tag(name: str) -> tuple[str, str]:
-    suffix = Path(name).suffix.lower()
-    tags = {
-        ".py": ("py", "#3572A5"),
-        ".js": ("js", "#f1e05a"),
-        ".ts": ("ts", "#3178c6"),
-        ".tsx": ("tsx", "#3178c6"),
-        ".jsx": ("jsx", "#61dafb"),
-        ".rs": ("rs", "#dea584"),
-        ".go": ("go", "#00add8"),
-        ".java": ("java", "#b07219"),
-        ".rb": ("rb", "#cc342d"),
-        ".c": ("c", "#555555"),
-        ".h": ("h", "#777"),
-        ".cpp": ("c++", "#f34b7d"),
-        ".hpp": ("h++", "#f34b7d"),
-        ".cs": ("cs", "#178600"),
-        ".md": ("md", "#519aba"),
-        ".json": ("json", "#cbcb41"),
-        ".yaml": ("yml", "#cb171e"),
-        ".yml": ("yml", "#cb171e"),
-        ".toml": ("toml", "#9c4221"),
-        ".cfg": ("cfg", "#6a9955"),
-        ".ini": ("ini", "#6a9955"),
-        ".sh": ("sh", "#89e051"),
-        ".bash": ("sh", "#89e051"),
-        ".zsh": ("zsh", "#89e051"),
-        ".html": ("html", "#e37933"),
-        ".css": ("css", "#563d7c"),
-        ".scss": ("scss", "#c6538c"),
-        ".sql": ("sql", "#e38c00"),
-        ".xml": ("xml", "#e37933"),
-        ".env": ("env", "#ecd53f"),
-        ".lock": ("lock", "#6a9955"),
-        ".log": ("log", "#888"),
-        ".txt": ("txt", "#888"),
-        ".lua": ("lua", "#000080"),
-        ".vim": ("vim", "#019833"),
-        ".hs": ("hs", "#5e5086"),
-        ".swift": ("swift", "#f05138"),
-        ".kt": ("kt", "#a97bff"),
-        ".dart": ("dart", "#00b4ab"),
-        ".r": ("r", "#276dc3"),
-        ".php": ("php", "#4f5d95"),
-        ".pl": ("pl", "#0298c3"),
-        ".ex": ("ex", "#6e4a7e"),
-        ".erl": ("erl", "#b83998"),
-        ".scala": ("scala", "#c22d40"),
-        ".diff": ("diff", "#5c8a5c"),
-        ".patch": ("patch", "#5c8a5c"),
-        ".csv": ("csv", "#e38c00"),
-        ".tf": ("tf", "#7b42bc"),
-        ".proto": ("proto", "#3a7ca5"),
-        ".graphql": ("gql", "#e535ab"),
-    }
-    tag, color = tags.get(suffix, ("", ""))
-    if not tag:
-        if name == "Makefile" or name == "Dockerfile":
-            return (name[:4].lower(), "#6a9955")
-        if name == "LICENSE" or name == "README" or name.startswith("README"):
-            return ("doc", "#519aba")
-        if name.startswith(".git"):
-            return ("git", "#f05032")
-        return ("", "")
-    return (tag, color)
+def _render_tree_row(
+    node: FileNode,
+    prefix: str,
+    is_cursor: bool,
+    tree_width: int,
+    expanded_set: set[str],
+) -> Text:
+    row = Text()
+    prefix_w = cell_len(prefix)
+    tag, tag_color = node.tag
+
+    if node.is_dir:
+        icon = _ICON_DIR_OPEN if node.path in expanded_set else _ICON_DIR
+        icon_w = cell_len(icon)
+        used_w = prefix_w + icon_w + 2
+        name_avail = tree_width - used_w
+        display_name = _truncate_text(node.name, max(1, name_avail))
+
+        row.append(prefix, style="dim #665c54")
+        if is_cursor:
+            row.append(f" {icon} ", style="bold #83a598 on #504945")
+            row.append(display_name, style="bold #83a598 on #504945")
+        else:
+            row.append(f" {icon} ", style="#83a598")
+            row.append(display_name, style="#83a598")
+    elif tag:
+        icon = tag
+        icon_w = cell_len(icon)
+        used_w = prefix_w + icon_w + 2
+        name_avail = tree_width - used_w
+        display_name = _truncate_text(node.name, max(1, name_avail))
+
+        row.append(prefix, style="dim #665c54")
+        if is_cursor:
+            row.append(f" {icon} ", style=f"bold {tag_color} on #504945")
+            row.append(display_name, style=f"bold {tag_color} on #504945")
+        else:
+            row.append(f" {icon} ", style=tag_color)
+            row.append(display_name, style=tag_color)
+    else:
+        used_w = prefix_w + 3
+        name_avail = tree_width - used_w
+        display_name = _truncate_text(node.name, max(1, name_avail))
+
+        row.append(prefix, style="dim #665c54")
+        if is_cursor:
+            row.append(f" {_ICON_FILE} ", style="on #504945")
+            row.append(display_name, style="on #504945")
+        else:
+            row.append(f" {_ICON_FILE} ", style="")
+            row.append(display_name, style="#d5c4a1")
+
+    return row
 
 
 def build_file_browser_overlay(
@@ -564,6 +685,11 @@ def build_file_browser_overlay(
     preview_is_text: bool = plugin_state.get("preview_is_text", False)
     preview_path: str | None = plugin_state.get("preview_path")
     expanded_set: set = set(plugin_state.get("expanded", frozenset()))
+
+    _flush_pending_preview(plugin_state)
+    preview_text = plugin_state.get("preview_text", "")
+    preview_is_text = plugin_state.get("preview_is_text", False)
+    preview_path = plugin_state.get("preview_path")
 
     flat = _get_flat(plugin_state)
     total = len(flat)
@@ -606,54 +732,7 @@ def build_file_browser_overlay(
 
     for i in range(scroll_offset, visible_end):
         node, prefix = flat[i]
-        is_cursor = i == cursor
-        row = Text()
-
-        prefix_w = cell_len(prefix)
-        tag, tag_color = _file_type_tag(node.name)
-
-        if node.is_dir:
-            icon = _ICON_DIR_OPEN if node.path in expanded_set else _ICON_DIR
-            icon_w = cell_len(icon)
-            used_w = prefix_w + icon_w + 2
-            name_avail = tree_width - used_w
-            display_name = _truncate_text(node.name, max(1, name_avail))
-
-            row.append(prefix, style="dim #665c54")
-            if is_cursor:
-                row.append(f" {icon} ", style="bold #83a598 on #504945")
-                row.append(display_name, style="bold #83a598 on #504945")
-            else:
-                row.append(f" {icon} ", style="#83a598")
-                row.append(display_name, style="#83a598")
-        else:
-            if tag:
-                icon = tag
-                icon_w = cell_len(icon)
-                used_w = prefix_w + icon_w + 2
-                name_avail = tree_width - used_w
-                display_name = _truncate_text(node.name, max(1, name_avail))
-
-                row.append(prefix, style="dim #665c54")
-                if is_cursor:
-                    row.append(f" {icon} ", style=f"bold {tag_color} on #504945")
-                    row.append(display_name, style=f"bold {tag_color} on #504945")
-                else:
-                    row.append(f" {icon} ", style=tag_color)
-                    row.append(display_name, style=tag_color)
-            else:
-                used_w = prefix_w + 3
-                name_avail = tree_width - used_w
-                display_name = _truncate_text(node.name, max(1, name_avail))
-
-                row.append(prefix, style="dim #665c54")
-                if is_cursor:
-                    row.append(f" {_ICON_FILE} ", style="on #504945")
-                    row.append(display_name, style="on #504945")
-                else:
-                    row.append(f" {_ICON_FILE} ", style="")
-                    row.append(display_name, style="#d5c4a1")
-
+        row = _render_tree_row(node, prefix, i == cursor, tree_width, expanded_set)
         tree_grid.add_row(row)
 
     if visible_end < total:

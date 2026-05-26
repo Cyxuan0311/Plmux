@@ -11,7 +11,18 @@ import subprocess
 import sys
 import time
 
-from plmux.extensions import register_hook, register_status_item, ExtensionContext
+from plmux.extensions import register_hook, register_status_item, ExtensionContext, plugin_metadata
+
+plugin_metadata(
+    name="battery-status",
+    version="1.1.0",
+    author="plmux",
+    description="Show battery percentage, charging state & CPU usage in status bar",
+    config_schema={
+        "cache_ttl": {"type": "float", "default": 10.0, "description": "Cache TTL in seconds"},
+        "show_cpu": {"type": "bool", "default": True, "description": "Show CPU usage indicator"},
+    },
+)
 
 _BAT_PREFIX = "bat:"
 _CPU_PREFIX = "cpu:"
