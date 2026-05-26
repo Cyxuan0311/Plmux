@@ -1182,6 +1182,16 @@ def list_themes() -> List[str]:
     for name in sorted(user.keys()):
         if name not in names:
             names.append(name)
+    from plmux.extensions.registry import get_theme_providers
+    for provider_name, provider_fn in get_theme_providers().items():
+        try:
+            available = provider_fn(None)
+            if isinstance(available, list):
+                for t in available:
+                    if isinstance(t, str) and t not in names:
+                        names.append(t)
+        except Exception:
+            pass
     return names
 
 
@@ -1192,5 +1202,10 @@ def load_theme(name: str) -> Theme:
     user = _load_user_themes()
     if name in user:
         return _parse_theme_data(name, user[name])
+
+    from plmux.extensions.registry import try_plugin_theme
+    plugin_data = try_plugin_theme(name)
+    if plugin_data:
+        return _parse_theme_data(name, plugin_data)
 
     return Theme(name="default")

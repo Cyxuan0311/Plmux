@@ -19,7 +19,19 @@ def build_layout_list_overlay(
     terminal_width: int,
     terminal_height: int,
 ) -> Panel:
-    templates = LAYOUT_TEMPLATES
+    templates = list(LAYOUT_TEMPLATES)
+    from plmux.extensions.registry import get_layout_algorithms
+    plugin_algos = get_layout_algorithms()
+    plugin_items = []
+    for algo_name in sorted(plugin_algos.keys()):
+        if not any(t.name == algo_name for t in templates):
+            plugin_items.append(LayoutTemplate(
+                name=algo_name,
+                description=f"Plugin: {algo_name}",
+                min_panes=1,
+                ascii_preview=["[plugin layout]"],
+            ))
+    templates.extend(plugin_items)
     if not templates:
         return Panel("No layout templates", title=" LAYOUTS ", border_style="red")
 

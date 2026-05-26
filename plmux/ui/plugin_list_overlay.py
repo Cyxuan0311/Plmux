@@ -7,7 +7,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from plmux.extensions.registry import discover_plugins, is_plugin_loaded
+from plmux.extensions.registry import discover_plugins, get_plugin_error, get_plugin_meta, is_plugin_loaded
 from plmux.ui.theme import Theme
 
 
@@ -35,11 +35,12 @@ def build_plugin_list_overlay(
     )
     table.add_column("", width=3)
     table.add_column("Plugin", style="bold #fabd2f", width=20)
+    table.add_column("Version", width=8)
     table.add_column("Status", width=10)
     table.add_column("Loaded", width=8)
 
     if not rows:
-        table.add_row("", "(no plugins found)", "", "", style="dim white")
+        table.add_row("", "(no plugins found)", "", "", "", style="dim white")
     else:
         for i, (name, enabled) in enumerate(rows):
             if i == cursor:
@@ -49,6 +50,9 @@ def build_plugin_list_overlay(
                 marker = " "
                 name_style = "#ebdbb2"
 
+            meta = get_plugin_meta(name)
+            version = meta.version if meta and meta.version != "0.0.0" else ""
+
             if enabled:
                 status_text = "\u2713 ON"
                 status_style = "bold #85c751"
@@ -56,8 +60,16 @@ def build_plugin_list_overlay(
                 status_text = "\u2717 OFF"
                 status_style = "dim #f92672"
 
-            loaded = "\u25CF" if is_plugin_loaded(name) else "\u25CB"
-            loaded_style = "#85c751" if is_plugin_loaded(name) else "dim #665c54"
+            error = get_plugin_error(name)
+            if error:
+                loaded = "\u2717"
+                loaded_style = "bold #f92672"
+            elif is_plugin_loaded(name):
+                loaded = "\u25CF"
+                loaded_style = "#85c751"
+            else:
+                loaded = "\u25CB"
+                loaded_style = "dim #665c54"
 
             row_marker = Text()
             row_marker.append(marker, style=name_style)
@@ -65,9 +77,20 @@ def build_plugin_list_overlay(
             table.add_row(
                 row_marker,
                 Text(name, style=name_style),
+                Text(version, style="dim #b8bb26"),
                 Text(status_text, style=status_style),
                 Text(loaded, style=loaded_style),
             )
+
+    desc_text = Text()
+    if rows and 0 <= cursor < len(rows):
+        selected_name = rows[cursor][0]
+        meta = get_plugin_meta(selected_name)
+        if meta and meta.description:
+            desc_text.append(f"  {meta.description}", style="dim #ebdbb2")
+        error = get_plugin_error(selected_name)
+        if error:
+            desc_text.append(f"  [error: {error}]", style="bold #f92672")
 
     footer = Text()
     footer.append(" \u2191\u2193 ", style="bold black on #85c751")
@@ -79,10 +102,12 @@ def build_plugin_list_overlay(
 
     inner = Table.grid(padding=(0, 1))
     inner.add_row(table)
+    if desc_text:
+        inner.add_row(desc_text)
     inner.add_row("")
     inner.add_row(footer)
 
-    max_w = min(terminal_width - 4, 58)
+    max_w = min(terminal_width - 4, 62)
     max_h = min(terminal_height - 4, 28)
 
     return Panel(

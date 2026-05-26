@@ -17,7 +17,8 @@ from plmux.workspace import TmuxServer
 
 _TAB_SESSIONS = 0
 _TAB_WINDOWS = 1
-_NUM_TABS = 2
+_TAB_TREE = 2
+_NUM_TABS = 3
 
 
 def build_session_list_overlay(
@@ -29,7 +30,7 @@ def build_session_list_overlay(
     terminal_width: int,
     terminal_height: int,
 ) -> Panel:
-    tab_labels = [" Sessions ", " Windows "]
+    tab_labels = [" Sessions ", " Windows ", " Tree "]
     tab_headers = Text()
     for i, label in enumerate(tab_labels):
         if i == active_tab:
@@ -41,6 +42,8 @@ def build_session_list_overlay(
 
     if active_tab == _TAB_WINDOWS:
         content = _build_windows_tab(ws, cursor)
+    elif active_tab == _TAB_TREE:
+        content = _build_tree_tab(ws, cursor)
     else:
         content = _build_sessions_tab(ws, cursor)
 
@@ -63,8 +66,8 @@ def build_session_list_overlay(
     inner.add_row("")
     inner.add_row(footer)
 
-    max_w = min(terminal_width - 4, 76)
-    max_h = min(terminal_height - 4, 28)
+    max_w = min(terminal_width - 4, 80)
+    max_h = min(terminal_height - 4, 30)
 
     return Panel(
         inner,
@@ -173,6 +176,78 @@ def _build_windows_tab(ws: TmuxServer, cursor: int) -> Table:
     return table
 
 
+def _build_tree_tab(ws: TmuxServer, cursor: int) -> Table:
+    rows = _build_tree_rows(ws)
+    if not rows:
+        return Table.grid().add_row(Text("No sessions", style="dim"))
+
+    cursor = max(0, min(cursor, len(rows) - 1))
+
+    table = Table(
+        show_header=False,
+        box=box.SIMPLE,
+        border_style="dim #665c54",
+        pad_edge=False,
+    )
+    table.add_column("Tree", min_width=60)
+
+    for i, (prefix, label, style) in enumerate(rows):
+        line = Text()
+        if i == cursor:
+            line.append("\u25B6 ", style="bold white")
+        else:
+            line.append("  ", style=style)
+        line.append(prefix, style=style)
+        line.append(label, style=style)
+        table.add_row(line)
+
+    return table
+
+
+def _build_tree_rows(ws: TmuxServer) -> list[tuple[str, str, str]]:
+    rows: list[tuple[str, str, str]] = []
+    for si, sess in enumerate(ws.sessions_list):
+        is_current_sess = si == ws.current_session
+        sess_style = "bold #85c751" if is_current_sess else "dim white"
+        sess_marker = " \u25CF " if is_current_sess else "   "
+        sess_name = sess.name or f"session{si}"
+        rows.append((sess_marker, f"S{si} {sess_name}  ({len(sess.windows)}w)", sess_style))
+
+        for wi, win in enumerate(sess.windows):
+            is_current_win = is_current_sess and wi == sess.current_window
+            win_style = "bold #83a598" if is_current_win else "dim white"
+            is_last_win = wi == len(sess.windows) - 1
+            win_branch = "\u2514\u2500\u2500 " if is_last_win else "\u251C\u2500\u2500 "
+            win_marker = " \u25CF " if is_current_win else "   "
+            win_name = win.name or f"win{wi}"
+            indices = pane_indices(win.tree)
+            rows.append((win_marker + win_branch, f"W{wi} {win_name}  ({len(indices)}p)", win_style))
+
+            for pi, pidx in enumerate(indices):
+                is_current_pane = is_current_win and pidx == win.focus_pane
+                pane_style = "bold white" if is_current_pane else "dim #a89984"
+                is_last_pane = pi == len(indices) - 1
+                pane_branch_inner = "    " if is_last_win else "\u2502   "
+                pane_branch = "\u2514\u2500\u2500 " if is_last_pane else "\u251C\u2500\u2500 "
+                pane_marker = " \u25CF " if is_current_pane else "   "
+
+                if pidx < len(win.panes):
+                    s = win.panes[pidx]
+                    cmd = s.current_command or ""
+                    if not cmd and s.argv:
+                        cmd = Path(s.argv[0]).name
+                    dead = getattr(s, "_dead", False)
+                    if dead:
+                        label = f"P{pidx} [DEAD]"
+                    else:
+                        label = f"P{pidx} {cmd}" if cmd else f"P{pidx} shell"
+                else:
+                    label = f"P{pidx} ?"
+                rows.append((pane_marker + pane_branch_inner + pane_branch, label, pane_style))
+
+    return rows
+
+
 def _layout_str(tree) -> str:
     if isinstance(tree, int):
         return f"pane:{tree}"
@@ -253,12 +328,21 @@ def _build_window_items(ws: TmuxServer) -> list[dict]:
 def get_item_count(ws: TmuxServer, active_tab: int) -> int:
     if active_tab == _TAB_WINDOWS:
         return len(ws._session().windows)
+    if active_tab == _TAB_TREE:
+        return len(_build_tree_rows(ws))
     return len(_build_session_items(ws))
 
 
 def get_item_at(ws: TmuxServer, cursor: int, active_tab: int = 0) -> dict | None:
     if active_tab == _TAB_WINDOWS:
         items = _build_window_items(ws)
+    elif active_tab == _TAB_TREE:
+        rows = _build_tree_rows(ws)
+        if not rows:
+            return None
+        cursor = max(0, min(cursor, len(rows) - 1))
+        prefix, label, style = rows[cursor]
+        return {"label": label, "style": style}
     else:
         items = _build_session_items(ws)
     if not items:
