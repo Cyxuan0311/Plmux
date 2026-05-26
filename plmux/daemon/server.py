@@ -273,6 +273,31 @@ class PlmuxDaemon:
                 self.ws.remove_pane(pane_idx)
                 need_rebuild = True
                 need_sync_geometry = True
+        elif action == "focus_direction":
+            direction = cmd.get("direction", "left")
+            self.ws.focus_direction(direction)
+        elif action == "swap_pane":
+            direction = cmd.get("direction", "up")
+            self.ws.swap_pane(direction)
+            need_sync_geometry = True
+        elif action == "break_pane":
+            pane_idx = cmd.get("pane_index")
+            self.ws.break_pane(pane_idx)
+            need_rebuild = True
+            need_sync_geometry = True
+        elif action == "join_pane":
+            direction = cmd.get("direction", "row")
+            self.ws.join_pane(direction)
+            need_rebuild = True
+            need_sync_geometry = True
+        elif action == "respawn_pane":
+            pane_idx = cmd.get("pane_index")
+            self.ws.respawn_pane(pane_idx)
+            need_rebuild = True
+            need_sync_geometry = True
+        elif action == "send_keys":
+            text = cmd.get("text", "")
+            self.ws.send_keys(text)
         elif action == "rename_window":
             name = cmd.get("name", "")
             self.ws.rename_window(name)

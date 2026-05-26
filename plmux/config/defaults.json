@@ -7,7 +7,23 @@
     "status_position": "bottom",
     "command_line_height": 1,
     "min_pane_rows": 3,
-    "min_pane_cols": 10
+    "min_pane_cols": 10,
+    "status_bar_style": {
+      "separator": "powerline",
+      "show_command": true,
+      "show_session": true,
+      "right_sections": "clock_host",
+      "spacing": "compact",
+      "mode_indicator": "full",
+      "show_window_index": true,
+      "show_pane_index": true
+    },
+    "pane_border_style": {
+      "box_style": "square",
+      "show_title": true,
+      "title_position": "left",
+      "active_indicator": "color"
+    }
   },
   "keys": {
     "prefix": "ctrl+b",

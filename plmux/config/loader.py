@@ -13,8 +13,10 @@ from plmux.config.schema import (
     ExtensionsConfig,
     HooksConfig,
     KeysConfig,
+    PaneBorderStyle,
     PlmuxConfig,
     SessionConfig,
+    StatusBarStyle,
     UIConfig,
 )
 
@@ -41,6 +43,8 @@ def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any
 
 
 def _parse_ui(d: Dict[str, Any]) -> UIConfig:
+    sb = d.get("status_bar_style", {})
+    pb = d.get("pane_border_style", {})
     return UIConfig(
         refresh_hz=float(d.get("refresh_hz", 60)),
         use_alternate_screen=bool(d.get("use_alternate_screen", True)),
@@ -48,6 +52,30 @@ def _parse_ui(d: Dict[str, Any]) -> UIConfig:
         command_line_height=int(d.get("command_line_height", 1)),
         min_pane_rows=int(d.get("min_pane_rows", 3)),
         min_pane_cols=int(d.get("min_pane_cols", 10)),
+        status_bar_style=_parse_status_bar_style(dict(sb) if isinstance(sb, dict) else {}),
+        pane_border_style=_parse_pane_border_style(dict(pb) if isinstance(pb, dict) else {}),
+    )
+
+
+def _parse_status_bar_style(d: Dict[str, Any]) -> StatusBarStyle:
+    return StatusBarStyle(
+        separator=str(d.get("separator", "powerline")),
+        show_command=bool(d.get("show_command", True)),
+        show_session=bool(d.get("show_session", True)),
+        right_sections=str(d.get("right_sections", "clock_host")),
+        spacing=str(d.get("spacing", "compact")),
+        mode_indicator=str(d.get("mode_indicator", "full")),
+        show_window_index=bool(d.get("show_window_index", True)),
+        show_pane_index=bool(d.get("show_pane_index", True)),
+    )
+
+
+def _parse_pane_border_style(d: Dict[str, Any]) -> PaneBorderStyle:
+    return PaneBorderStyle(
+        box_style=str(d.get("box_style", "square")),
+        show_title=bool(d.get("show_title", True)),
+        title_position=str(d.get("title_position", "left")),
+        active_indicator=str(d.get("active_indicator", "color")),
     )
 
 
@@ -76,11 +104,18 @@ def _parse_session(d: Dict[str, Any]) -> SessionConfig:
 
 
 def _parse_extensions(d: Dict[str, Any]) -> ExtensionsConfig:
+    raw_settings = d.get("plugin_settings", {})
+    parsed_settings: Dict[str, Dict[str, Any]] = {}
+    if isinstance(raw_settings, dict):
+        for plugin_name, settings in raw_settings.items():
+            if isinstance(settings, dict):
+                parsed_settings[str(plugin_name)] = dict(settings)
     return ExtensionsConfig(
         enabled=list(d.get("enabled", [])),
         search_paths=list(
             d.get("search_paths", ["~/.config/plmux/extensions"])
         ),
+        plugin_settings=parsed_settings,
     )
 
 
@@ -151,6 +186,22 @@ def save_user_config(cfg: PlmuxConfig, explicit_path: str | None = None) -> None
             "command_line_height": cfg.ui.command_line_height,
             "min_pane_rows": cfg.ui.min_pane_rows,
             "min_pane_cols": cfg.ui.min_pane_cols,
+            "status_bar_style": {
+                "separator": cfg.ui.status_bar_style.separator,
+                "show_command": cfg.ui.status_bar_style.show_command,
+                "show_session": cfg.ui.status_bar_style.show_session,
+                "right_sections": cfg.ui.status_bar_style.right_sections,
+                "spacing": cfg.ui.status_bar_style.spacing,
+                "mode_indicator": cfg.ui.status_bar_style.mode_indicator,
+                "show_window_index": cfg.ui.status_bar_style.show_window_index,
+                "show_pane_index": cfg.ui.status_bar_style.show_pane_index,
+            },
+            "pane_border_style": {
+                "box_style": cfg.ui.pane_border_style.box_style,
+                "show_title": cfg.ui.pane_border_style.show_title,
+                "title_position": cfg.ui.pane_border_style.title_position,
+                "active_indicator": cfg.ui.pane_border_style.active_indicator,
+            },
         },
         "keys": {
             "prefix": cfg.keys.prefix,
@@ -165,6 +216,7 @@ def save_user_config(cfg: PlmuxConfig, explicit_path: str | None = None) -> None
         "extensions": {
             "enabled": cfg.extensions.enabled,
             "search_paths": cfg.extensions.search_paths,
+            "plugin_settings": cfg.extensions.plugin_settings,
         },
     }
     data.update(cfg.extra)

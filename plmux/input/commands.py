@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional
 
+from plmux.config.schema import KeysConfig
 from plmux.extensions.registry import ExtensionContext, emit_hook, get_plugin_commands
 from plmux.workspace import TmuxServer
 
@@ -23,6 +24,8 @@ class CommandResult:
     show_help: bool = False
     show_theme_list: bool = False
     show_session_list: bool = False
+    show_statusbar_style: bool = False
+    show_pane_border_style: bool = False
     show_plugin_list: bool = False
     show_layout_list: bool = False
     start_web_server: bool = False
@@ -40,6 +43,8 @@ class CommandResult:
     new_session_name: Optional[str] = None
     kill_session_idx: Optional[int] = None
     remote_command: Optional[dict] = None
+    set_option: Optional[dict] = None
+    show_options: bool = False
 
 
 def _cmd_exit(ws: TmuxServer, args: List[str]) -> CommandResult:
@@ -98,6 +103,14 @@ def _cmd_ls(ws: TmuxServer, args: List[str]) -> CommandResult:
     return CommandResult(show_session_list=True)
 
 
+def _cmd_statusbar(ws: TmuxServer, args: List[str]) -> CommandResult:
+    return CommandResult(show_statusbar_style=True)
+
+
+def _cmd_paneborder(ws: TmuxServer, args: List[str]) -> CommandResult:
+    return CommandResult(show_pane_border_style=True)
+
+
 def _cmd_plugin(ws: TmuxServer, args: List[str]) -> CommandResult:
     return CommandResult(show_plugin_list=True)
 
@@ -138,6 +151,326 @@ def _cmd_sync(ws: TmuxServer, args: List[str]) -> CommandResult:
     if val in ("off", "no", "0", "false"):
         return CommandResult(toggle_broadcast=False, message="synchronize-panes off")
     return CommandResult("usage: sync [on|off]")
+
+
+def _cmd_kill_pane(ws: TmuxServer, args: List[str]) -> CommandResult:
+    if args:
+        try:
+            idx = int(args[0])
+        except ValueError:
+            return CommandResult("kill-pane: need integer index")
+    else:
+        idx = ws.focus_pane
+    win = ws._window()
+    if idx < 0 or idx >= len(win.panes):
+        return CommandResult(f"kill-pane: index {idx} out of range")
+    if len(win.panes) <= 1:
+        return CommandResult(quit=True, hard_quit=True)
+    ws.remove_pane(idx)
+    return CommandResult(f"kill-pane {idx}", remote_command={"action": "kill_pane", "pane_index": idx})
+
+
+def _cmd_swap_pane(ws: TmuxServer, args: List[str]) -> CommandResult:
+    direction = "up"
+    if args:
+        d = args[0].lower()
+        if d in ("up", "u", "left", "l"):
+            direction = "up"
+        elif d in ("down", "d", "right", "r"):
+            direction = "down"
+        else:
+            return CommandResult("usage: swap-pane [up|down]")
+    ws.swap_pane(direction)
+    return CommandResult(f"swap-pane {direction}", remote_command={"action": "swap_pane", "direction": direction})
+
+
+def _cmd_break_pane(ws: TmuxServer, args: List[str]) -> CommandResult:
+    win = ws._window()
+    if len(win.panes) <= 1:
+        return CommandResult("break-pane: only one pane in window")
+    pane_idx = ws.focus_pane
+    ws.break_pane(pane_idx)
+    return CommandResult("break-pane -> new window", remote_command={"action": "break_pane", "pane_index": pane_idx})
+
+
+def _cmd_join_pane(ws: TmuxServer, args: List[str]) -> CommandResult:
+    direction = "row"
+    if args:
+        d = args[0].lower()
+        if d in ("vertical", "v", "col", "stacked", "s"):
+            direction = "col"
+        elif d in ("horizontal", "h", "row", "side", "side-by-side"):
+            direction = "row"
+        else:
+            return CommandResult("usage: join-pane [horizontal|vertical]")
+    ws.join_pane(direction)
+    return CommandResult(f"join-pane {direction}", remote_command={"action": "join_pane", "direction": direction})
+
+
+def _cmd_respawn_pane(ws: TmuxServer, args: List[str]) -> CommandResult:
+    pane_idx = ws.focus_pane
+    if args:
+        try:
+            pane_idx = int(args[0])
+        except ValueError:
+            return CommandResult("respawn-pane: need integer index")
+    ws.respawn_pane(pane_idx)
+    return CommandResult(f"respawn-pane {pane_idx}", remote_command={"action": "respawn_pane", "pane_index": pane_idx})
+
+
+def _cmd_send_keys(ws: TmuxServer, args: List[str]) -> CommandResult:
+    if not args:
+        return CommandResult("usage: send-keys <text>")
+    text = " ".join(args)
+    ws.send_keys(text)
+    return CommandResult(f"send-keys: sent {len(text)} chars", remote_command={"action": "send_keys", "text": text})
+
+
+_SETTABLE_OPTIONS = {
+    "remain-on-exit": ("ui", "remain_on_exit", bool),
+    "status-position": ("ui", "status_position", str),
+    "scrollback-lines": ("ui", "scrollback_lines", int),
+    "min-pane-rows": ("ui", "min_pane_rows", int),
+    "min-pane-cols": ("ui", "min_pane_cols", int),
+    "synchronize-panes": ("_runtime", "synchronize_panes", bool),
+    "prefix": ("keys", "prefix", str),
+    "status-left-format": ("ui", "status_left_format", str),
+    "status-right-format": ("ui", "status_right_format", str),
+    "default-shell": ("shell", None, list),
+}
+
+_BINDABLE_ACTIONS = [
+    ["split-vertical"],
+    ["split-horizontal"],
+    ["only-pane"],
+    ["next-window"],
+    ["prev-window"],
+    ["new-window"],
+    ["close-window"],
+    ["copy-mode"],
+    ["cycle-layout"],
+    ["help"],
+    ["detach"],
+    ["focus-left"],
+    ["focus-right"],
+    ["focus-up"],
+    ["focus-down"],
+    ["resize-left"],
+    ["resize-right"],
+    ["resize-up"],
+    ["resize-down"],
+    ["zoom"],
+    ["synchronize-panes"],
+    ["rotate-window"],
+    ["kill-pane"],
+    ["swap-pane-up"],
+    ["swap-pane-down"],
+    ["break-pane"],
+    ["clock-mode"],
+    ["rectangle-toggle"],
+    ["rename-window"],
+    ["command-line"],
+    ["next-session"],
+    ["prev-session"],
+    ["switch-session"],
+    ["new-session"],
+    ["rename-session"],
+    ["last-window"],
+    ["last-pane"],
+    ["display-panes"],
+]
+
+
+def _parse_bool(val: str) -> bool:
+    return val.lower() in ("on", "yes", "1", "true")
+
+
+def _cmd_set_option(ws: TmuxServer, args: List[str]) -> CommandResult:
+    if not args:
+        return CommandResult("usage: set-option <name> <value>")
+    name = args[0]
+    spec = _SETTABLE_OPTIONS.get(name)
+    if spec is None:
+        return CommandResult(f"unknown option: {name}")
+    section, attr, typ = spec
+    if len(args) < 2:
+        return CommandResult(f"usage: set-option {name} <value>")
+    raw = " ".join(args[1:])
+    if name == "synchronize-panes":
+        val = _parse_bool(raw)
+        return CommandResult(
+            toggle_broadcast=val,
+            message=f"set {name} -> {val}",
+        )
+    if name == "default-shell":
+        ws.cfg.shell = raw.split()
+        return CommandResult(f"set {name} -> {raw}")
+    cfg_section = getattr(ws.cfg, section)
+    if typ is bool:
+        val = _parse_bool(raw)
+    elif typ is int:
+        try:
+            val = int(raw)
+        except ValueError:
+            return CommandResult(f"invalid integer: {raw}")
+    else:
+        val = raw
+    setattr(cfg_section, attr, val)
+    return CommandResult(
+        f"set {name} -> {val}",
+        set_option={"section": section, "attr": attr, "value": val},
+    )
+
+
+def _cmd_show_options(ws: TmuxServer, args: List[str]) -> CommandResult:
+    lines: list[str] = []
+    for name, (section, attr, typ) in _SETTABLE_OPTIONS.items():
+        if name == "synchronize-panes":
+            lines.append(f"{name} = (runtime)")
+            continue
+        if name == "default-shell":
+            shell = ws.cfg.shell
+            lines.append(f"{name} = {' '.join(shell) if shell else '(default)'}")
+            continue
+        cfg_section = getattr(ws.cfg, section)
+        val = getattr(cfg_section, attr, "(unset)")
+        lines.append(f"{name} = {val}")
+    return CommandResult(message="\n".join(lines), show_options=True)
+
+
+def _cmd_bind_key(ws: TmuxServer, args: List[str]) -> CommandResult:
+    if len(args) < 2:
+        return CommandResult("usage: bind-key <key> <action>")
+    key = args[0]
+    action = args[1]
+    bindings = ws.cfg.keys.bindings
+    if action not in bindings:
+        bindings[action] = []
+    if key not in bindings[action]:
+        bindings[action].append(key)
+    return CommandResult(f"bound {key} -> {action}")
+
+
+def _cmd_unbind_key(ws: TmuxServer, args: List[str]) -> CommandResult:
+    if not args:
+        return CommandResult("usage: unbind-key <key>")
+    key = args[0]
+    bindings = ws.cfg.keys.bindings
+    found = False
+    for action_keys in bindings.values():
+        if key in action_keys:
+            action_keys.remove(key)
+            found = True
+    if found:
+        return CommandResult(f"unbound {key}")
+    return CommandResult(f"key not bound: {key}")
+
+
+def _cmd_display_panes(ws: TmuxServer, args: List[str]) -> CommandResult:
+    return CommandResult(remote_command={"action": "display_panes"})
+
+
+def _cmd_last_window(ws: TmuxServer, args: List[str]) -> CommandResult:
+    ws.last_window()
+    return CommandResult(f"last-window -> {ws._session().current_window}", remote_command={"action": "last_window"})
+
+
+def _cmd_last_pane(ws: TmuxServer, args: List[str]) -> CommandResult:
+    ws.last_pane()
+    return CommandResult(f"last-pane -> {ws.focus_pane}", remote_command={"action": "last_pane"})
+
+
+def _cmd_set_buffer(ws: TmuxServer, args: List[str]) -> CommandResult:
+    if not args:
+        return CommandResult("usage: set-buffer <data>")
+    data = " ".join(args)
+    name = ws.buffers.set(data)
+    return CommandResult(f"set-buffer -> {name} ({len(data)} bytes)")
+
+
+def _cmd_show_buffer(ws: TmuxServer, args: List[str]) -> CommandResult:
+    name = args[0] if args else None
+    data = ws.buffers.paste(name)
+    if data is None:
+        return CommandResult("no buffer" + (f" '{name}'" if name else ""))
+    preview = data[:200] + ("..." if len(data) > 200 else "")
+    return CommandResult(message=preview)
+
+
+def _cmd_list_buffers(ws: TmuxServer, args: List[str]) -> CommandResult:
+    items = ws.buffers.list()
+    if not items:
+        return CommandResult(message="no buffers")
+    lines = []
+    for bname, size, created in items:
+        import time as _time
+        ts = _time.strftime("%H:%M:%S", _time.localtime(created))
+        lines.append(f"{bname}  {size} bytes  {ts}")
+    return CommandResult(message="\n".join(lines))
+
+
+def _cmd_delete_buffer(ws: TmuxServer, args: List[str]) -> CommandResult:
+    if not args:
+        return CommandResult("usage: delete-buffer <name>")
+    name = args[0]
+    if ws.buffers.delete(name):
+        return CommandResult(f"deleted buffer: {name}")
+    return CommandResult(f"buffer not found: {name}")
+
+
+def _cmd_save_buffer(ws: TmuxServer, args: List[str]) -> CommandResult:
+    if len(args) < 2:
+        return CommandResult("usage: save-buffer <name> <path>")
+    name, path = args[0], args[1]
+    if ws.buffers.save(name, path):
+        return CommandResult(f"saved buffer {name} -> {path}")
+    return CommandResult(f"failed to save buffer: {name}")
+
+
+def _cmd_load_buffer(ws: TmuxServer, args: List[str]) -> CommandResult:
+    if not args:
+        return CommandResult("usage: load-buffer <path> [name]")
+    path = args[0]
+    name = args[1] if len(args) > 1 else None
+    result = ws.buffers.load(path, name)
+    if result is not None:
+        return CommandResult(f"loaded buffer: {result}")
+    return CommandResult(f"failed to load buffer from: {path}")
+
+
+def _cmd_paste_buffer(ws: TmuxServer, args: List[str]) -> CommandResult:
+    name = args[0] if args else None
+    data = ws.buffers.paste(name)
+    if data is None:
+        return CommandResult("no buffer to paste")
+    ws.send_keys(data)
+    return CommandResult(f"pasted {len(data)} chars", remote_command={"action": "send_keys", "text": data})
+
+
+def _cmd_set_environment(ws: TmuxServer, args: List[str]) -> CommandResult:
+    if len(args) < 2:
+        return CommandResult("usage: set-environment <key> <value>")
+    key = args[0]
+    value = " ".join(args[1:])
+    ws.setenv(key, value)
+    return CommandResult(f"setenv {key}={value}")
+
+
+def _cmd_show_environment(ws: TmuxServer, args: List[str]) -> CommandResult:
+    env = ws.showenv()
+    if not env:
+        return CommandResult(message="(no session environment)")
+    lines = [f"{k}={v}" for k, v in sorted(env.items())]
+    return CommandResult(message="\n".join(lines))
+
+
+def _cmd_unset_environment(ws: TmuxServer, args: List[str]) -> CommandResult:
+    if not args:
+        return CommandResult("usage: unset-environment <key>")
+    key = args[0]
+    if ws.unsetenv(key):
+        return CommandResult(f"unsetenv {key}")
+    return CommandResult(f"environment variable not found: {key}")
 
 
 def _cmd_rotate(ws: TmuxServer, args: List[str]) -> CommandResult:
@@ -248,10 +581,58 @@ _COMMANDS: Dict[str, Callable] = {
     "vsp": _cmd_vsplit,
     "vs": _cmd_vsplit,
     "focus": _cmd_focus,
+    "kill-pane": _cmd_kill_pane,
+    "killp": _cmd_kill_pane,
+    "swap-pane": _cmd_swap_pane,
+    "swapp": _cmd_swap_pane,
+    "break-pane": _cmd_break_pane,
+    "breakp": _cmd_break_pane,
+    "join-pane": _cmd_join_pane,
+    "joinp": _cmd_join_pane,
+    "respawn-pane": _cmd_respawn_pane,
+    "respawnp": _cmd_respawn_pane,
+    "send-keys": _cmd_send_keys,
+    "sendk": _cmd_send_keys,
+    "set-option": _cmd_set_option,
+    "set": _cmd_set_option,
+    "show-options": _cmd_show_options,
+    "show": _cmd_show_options,
+    "bind-key": _cmd_bind_key,
+    "bind": _cmd_bind_key,
+    "unbind-key": _cmd_unbind_key,
+    "unbind": _cmd_unbind_key,
+    "display-panes": _cmd_display_panes,
+    "displayp": _cmd_display_panes,
+    "last-window": _cmd_last_window,
+    "lastw": _cmd_last_window,
+    "last-pane": _cmd_last_pane,
+    "lastp": _cmd_last_pane,
+    "set-buffer": _cmd_set_buffer,
+    "setb": _cmd_set_buffer,
+    "show-buffer": _cmd_show_buffer,
+    "showb": _cmd_show_buffer,
+    "list-buffers": _cmd_list_buffers,
+    "lsb": _cmd_list_buffers,
+    "delete-buffer": _cmd_delete_buffer,
+    "deleteb": _cmd_delete_buffer,
+    "save-buffer": _cmd_save_buffer,
+    "saveb": _cmd_save_buffer,
+    "load-buffer": _cmd_load_buffer,
+    "loadb": _cmd_load_buffer,
+    "paste-buffer": _cmd_paste_buffer,
+    "pasteb": _cmd_paste_buffer,
+    "set-environment": _cmd_set_environment,
+    "setenv": _cmd_set_environment,
+    "show-environment": _cmd_show_environment,
+    "showenv": _cmd_show_environment,
+    "unset-environment": _cmd_unset_environment,
+    "unsetenv": _cmd_unset_environment,
     "theme": _cmd_theme,
     "help": _cmd_help,
     "ls": _cmd_ls,
     "sessions": _cmd_ls,
+    "statusbar": _cmd_statusbar,
+    "paneborder": _cmd_paneborder,
     "plugin": _cmd_plugin,
     "plugins": _cmd_plugin,
     "layout": _cmd_layout,
@@ -339,6 +720,23 @@ def get_completions(prefix: str) -> List[str]:
 
     if cmd in ("switch-session", "switchs", "kill-session", "kills") and (len(parts) == 2 or (len(parts) == 1 and has_trailing_space)):
         return [str(i) for i in range(10) if str(i).startswith(word)]
+
+    if cmd in ("set-option", "set") and (len(parts) == 2 or (len(parts) == 1 and has_trailing_space)):
+        return [o for o in _SETTABLE_OPTIONS if o.startswith(word)]
+
+    if cmd in ("bind-key", "bind") and (len(parts) >= 2 or (len(parts) == 1 and has_trailing_space)):
+        if len(parts) == 2 and not has_trailing_space:
+            return []
+        if len(parts) == 2 and has_trailing_space or len(parts) >= 3:
+            actions = [a[0] for a in _BINDABLE_ACTIONS]
+            return [a for a in sorted(actions) if a.startswith(word)]
+        return []
+
+    if cmd in ("unbind-key", "unbind") and (len(parts) == 2 or (len(parts) == 1 and has_trailing_space)):
+        all_keys = set()
+        for action_keys in KeysConfig().bindings.values():
+            all_keys.update(action_keys)
+        return [k for k in sorted(all_keys) if k.startswith(word)]
 
     return []
 

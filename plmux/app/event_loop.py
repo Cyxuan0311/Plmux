@@ -19,7 +19,7 @@ from rich.live import Live
 from plmux.config.loader import load_config
 from plmux.daemon import ServerState
 from plmux.debug_log import setup_debug_logging
-from plmux.extensions.registry import ExtensionContext, emit_hook, load_plugins, get_plugin_status_items, get_plugin_overlay, load_config_hooks
+from plmux.extensions.registry import ExtensionContext, emit_hook, load_plugins, get_plugin_status_items, get_plugin_overlay, load_config_hooks, set_plugin_settings
 from plmux.modes import AppContext
 from plmux.modes.dispatcher import dispatch_key
 from plmux.session.store import save_session
@@ -610,6 +610,7 @@ async def async_main(
                     if not plugins_loaded and frame_count >= 2:
                         plugins_loaded = True
                         load_config_hooks(cfg.hooks.hooks)
+                        set_plugin_settings(cfg.extensions.plugin_settings)
                         load_plugins(cfg.extensions.enabled, cfg.extensions.search_paths)
                         emit_hook(
                             "app_started",
@@ -724,36 +725,46 @@ async def async_main(
                         pass
 
                     win = ctx.ws._window()
-                    dead_indices = [i for i, s in enumerate(win.panes) if s.closed]
+                    remain_on_exit = getattr(ctx.cfg.ui, "remain_on_exit", False)
+                    dead_indices = [i for i, s in enumerate(win.panes) if s.closed and not s._dead]
                     if dead_indices:
-                        for i in sorted(dead_indices, reverse=True):
-                            if not ctx.ws.remove_pane(i):
+                        if remain_on_exit:
+                            for i in dead_indices:
+                                win.panes[i]._dead = True
+                            ctx.dirty = True
+                        else:
+                            for i in sorted(dead_indices, reverse=True):
+                                if not ctx.ws.remove_pane(i):
+                                    ctx.hard_quit_requested = True
+                                    ctx.running = False
+                            ctx.dirty = True
+                            if ctx.running and not win.panes:
                                 ctx.hard_quit_requested = True
                                 ctx.running = False
-                        ctx.dirty = True
-                        if ctx.running and not win.panes:
-                            ctx.hard_quit_requested = True
-                            ctx.running = False
-                        if not ctx.running:
-                            continue
+                            if not ctx.running:
+                                continue
 
                     for si, sess in enumerate(ctx.ws.sessions_list):
                         if si == ctx.ws.current_session:
                             continue
                         for w in sess.windows:
-                            dead = [i for i, s in enumerate(w.panes) if s.closed]
-                            for di in sorted(dead, reverse=True):
-                                if di < len(w.panes):
-                                    w.panes[di].close()
-                                    del w.panes[di]
-                                    new_tree = remove_pane_collapse(w.tree, di)
-                                    if new_tree is None:
-                                        w.tree = 0
-                                    else:
-                                        w.tree = reindex_after_remove(new_tree, di)
-                            if not w.panes:
-                                w.tree = 0
-                                w.focus_pane = 0
+                            dead = [i for i, s in enumerate(w.panes) if s.closed and not s._dead]
+                            if remain_on_exit:
+                                for di in dead:
+                                    w.panes[di]._dead = True
+                            else:
+                                for di in sorted(dead, reverse=True):
+                                    if di < len(w.panes):
+                                        w.panes[di].close()
+                                        del w.panes[di]
+                                        new_tree = remove_pane_collapse(w.tree, di)
+                                        if new_tree is None:
+                                            w.tree = 0
+                                        else:
+                                            w.tree = reindex_after_remove(new_tree, di)
+                                if not w.panes:
+                                    w.tree = 0
+                                    w.focus_pane = 0
 
                     if ctx.dirty or keys:
                         extra_items = []
@@ -822,9 +833,19 @@ async def async_main(
                             pet_mode_pane=ctx.pet_mode_pane,
                             pet_type=ctx.pet_type,
                             pet_frame=ctx.pet_frame,
+                            broadcast_enabled=ctx.broadcast_enabled,
+                            display_panes_active=ctx.display_panes_active,
+                            statusbar_style_active=(ctx.mode == "statusbar_style"),
+                            statusbar_style_cursor=ctx.statusbar_style_cursor,
+                            pane_border_style_active=(ctx.mode == "pane_border_style"),
+                            pane_border_style_cursor=ctx.pane_border_style_cursor,
                         )
                         live.update(root)
                         ctx.dirty = False
+
+                    if ctx.display_panes_active and time.monotonic() > ctx.display_panes_until:
+                        ctx.display_panes_active = False
+                        ctx.dirty = True
 
                     elapsed = time.monotonic() - frame_start
                     poll_interval = min(frame_sleep, 0.004)

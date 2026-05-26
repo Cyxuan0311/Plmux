@@ -102,6 +102,7 @@ class TerminalSession:
         )
         self._closed = False
         self._cached_closed = False
+        self._dead = False
         self._last_alive_check = 0.0
         self._pty_nonblocking = False
         self._app_cursor_keys = False
@@ -214,6 +215,7 @@ class TerminalSession:
         self.proc = PtyHandle(fd, pid, _sock=_sock)
         self._closed = False
         self._cached_closed = False
+        self._dead = False
         self._last_alive_check = 0.0
         self._pty_nonblocking = False
         self._app_cursor_keys = False
@@ -261,6 +263,7 @@ class TerminalSession:
         self.proc = None
         self._closed = False
         self._cached_closed = False
+        self._dead = False
         self._last_alive_check = 0.0
         self._pty_nonblocking = False
         self._app_cursor_keys = False
@@ -999,6 +1002,8 @@ class TerminalSession:
 
     @property
     def closed(self) -> bool:
+        if self._dead:
+            return True
         if self._closed:
             return True
         if self.is_remote:
@@ -1010,3 +1015,11 @@ class TerminalSession:
         self._cached_closed = not is_alive
         self._last_alive_check = now
         return self._cached_closed
+
+    @property
+    def dead(self) -> bool:
+        return self._dead
+
+    @dead.setter
+    def dead(self, value: bool) -> None:
+        self._dead = value

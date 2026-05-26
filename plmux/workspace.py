@@ -32,9 +32,60 @@ from plmux.ui.geometry import (
     replace_pane,
     rotate_leaves,
 )
+from plmux.ui.geometry import Rect
 from plmux.ui.theme import Theme
 from plmux.extensions.registry import ExtensionContext, emit_hook
 from plmux.buffer.manager import BufferManager
+
+
+def _direction_score(cur: Rect, target: Rect, direction: str) -> float | None:
+    cur_cx = cur.col + cur.cols / 2
+    cur_cy = cur.row + cur.rows / 2
+    tgt_cx = target.col + target.cols / 2
+    tgt_cy = target.row + target.rows / 2
+    dx = tgt_cx - cur_cx
+    dy = tgt_cy - cur_cy
+    if direction == "left":
+        if dx >= 0:
+            return None
+        overlap = _vertical_overlap(cur, target)
+        if overlap <= 0:
+            return None
+        return -dx
+    elif direction == "right":
+        if dx <= 0:
+            return None
+        overlap = _vertical_overlap(cur, target)
+        if overlap <= 0:
+            return None
+        return dx
+    elif direction == "up":
+        if dy >= 0:
+            return None
+        overlap = _horizontal_overlap(cur, target)
+        if overlap <= 0:
+            return None
+        return -dy
+    elif direction == "down":
+        if dy <= 0:
+            return None
+        overlap = _horizontal_overlap(cur, target)
+        if overlap <= 0:
+            return None
+        return dy
+    return None
+
+
+def _vertical_overlap(a: Rect, b: Rect) -> int:
+    top = max(a.row, b.row)
+    bot = min(a.row + a.rows, b.row + b.rows)
+    return max(0, bot - top)
+
+
+def _horizontal_overlap(a: Rect, b: Rect) -> int:
+    left = max(a.col, b.col)
+    right = min(a.col + a.cols, b.col + b.cols)
+    return max(0, right - left)
 
 
 @dataclass
@@ -216,6 +267,10 @@ class Session:
         self._zoomed: bool = False
         self._zoom_prev_tree: Tree | None = None
         self._zoom_prev_focus: int | None = None
+        self._last_window: int = 0
+        self._last_pane: int = 0
+        self._content_rows: int | None = None
+        self._content_cols: int | None = None
 
         if restore:
             tree = tree_from_json(restore.tree)
@@ -337,6 +392,7 @@ class Session:
         if win.focus_pane not in order:
             win.focus_pane = order[0]
             return
+        self._last_pane = win.focus_pane
         pos = order.index(win.focus_pane)
         win.focus_pane = order[(pos + 1) % len(order)]
         self._mark()
@@ -349,6 +405,7 @@ class Session:
         if win.focus_pane not in order:
             win.focus_pane = order[0]
             return
+        self._last_pane = win.focus_pane
         pos = order.index(win.focus_pane)
         win.focus_pane = order[(pos - 1) % len(order)]
         self._mark()
@@ -377,7 +434,136 @@ class Session:
         win.tree = rotate_leaves(win.tree, direction)
         self._mark()
 
+    def focus_direction(self, direction: str) -> None:
+        win = self._window()
+        rects = assign_rects(win.tree, 0, 0, self._content_rows or 24, self._content_cols or 80)
+        if len(rects) <= 1:
+            return
+        if win.focus_pane not in rects:
+            return
+        cur = rects[win.focus_pane]
+        best_idx = None
+        best_score = float("inf")
+        for idx, r in rects.items():
+            if idx == win.focus_pane:
+                continue
+            score = _direction_score(cur, r, direction)
+            if score is not None and score < best_score:
+                best_score = score
+                best_idx = idx
+        if best_idx is not None:
+            win.focus_pane = best_idx
+            self._mark()
+
+    def swap_pane(self, direction: str) -> None:
+        win = self._window()
+        order = pane_indices(win.tree)
+        if len(order) <= 1:
+            return
+        pos = order.index(win.focus_pane)
+        if direction == "up":
+            target_pos = (pos + 1) % len(order)
+        else:
+            target_pos = (pos - 1) % len(order)
+        target_idx = order[target_pos]
+        mapping = {order[pos]: order[target_pos], order[target_pos]: order[pos]}
+
+        def _remap(t: Tree) -> Tree:
+            if isinstance(t, int):
+                return mapping.get(t, t)
+            d, r, a, b = t
+            return (d, r, _remap(a), _remap(b))
+
+        win.tree = _remap(win.tree)
+        win.focus_pane = target_idx
+        self._mark()
+
+    def break_pane(self, pane_idx: int | None = None) -> bool:
+        win = self._window()
+        if len(win.panes) <= 1:
+            return False
+        idx = pane_idx if pane_idx is not None else win.focus_pane
+        if idx < 0 or idx >= len(win.panes):
+            return False
+        pane_session = win.panes[idx]
+        emit_hook("pane_closed", ExtensionContext(hook_name="pane_closed", pane_index=idx))
+        del win.panes[idx]
+        new_tree = remove_pane_collapse(win.tree, idx)
+        if new_tree is None:
+            win.tree = 0
+        else:
+            win.tree = reindex_after_remove(new_tree, idx)
+        if win.focus_pane > idx:
+            win.focus_pane -= 1
+        elif win.focus_pane == idx:
+            order = pane_indices(win.tree)
+            win.focus_pane = order[0] if order else 0
+        win.focus_pane = max(0, min(win.focus_pane, count_panes(win.tree) - 1))
+        new_win = Window(tree=0, focus_pane=0, panes=[pane_session])
+        self.windows.append(new_win)
+        self.current_window = len(self.windows) - 1
+        self._mark()
+        emit_hook("window_created", ExtensionContext(hook_name="window_created", window_index=self.current_window, pane_index=0))
+        return True
+
+    def join_pane(self, direction: str = "row") -> bool:
+        if len(self.windows) <= 1:
+            return False
+        src_win_idx = (self.current_window + 1) % len(self.windows)
+        src_win = self.windows[src_win_idx]
+        if not src_win.panes:
+            return False
+        last_pane_idx = len(src_win.panes) - 1
+        pane_to_move = src_win.panes[last_pane_idx]
+        del src_win.panes[last_pane_idx]
+        if src_win.panes:
+            src_new_tree = remove_pane_collapse(src_win.tree, last_pane_idx)
+            if src_new_tree is None:
+                src_win.tree = 0
+            else:
+                src_win.tree = reindex_after_remove(src_new_tree, last_pane_idx)
+        else:
+            src_win.tree = 0
+        win = self._window()
+        new_idx = len(win.panes)
+        win.panes.append(pane_to_move)
+        sub: Tree = (direction, 0.5, self.focus_pane, new_idx)
+        win.tree = replace_pane(win.tree, self.focus_pane, sub)
+        win.focus_pane = new_idx
+        self._mark()
+        emit_hook("pane_created", ExtensionContext(hook_name="pane_created", pane_index=new_idx))
+        return True
+
+    def respawn_pane(self, pane_idx: int | None = None) -> bool:
+        win = self._window()
+        idx = pane_idx if pane_idx is not None else win.focus_pane
+        if idx < 0 or idx >= len(win.panes):
+            return False
+        old_argv = win.panes[idx].argv
+        old_env = dict(self.env)
+        old_rows = win.panes[idx].rows
+        old_cols = win.panes[idx].cols
+        on_update_cb = getattr(win.panes[idx], "_on_update", None)
+        win.panes[idx].close()
+        new_sess = TerminalSession(
+            max(1, old_rows),
+            max(1, old_cols),
+            shell=list(old_argv),
+            env=old_env,
+            on_update=on_update_cb,
+            scrollback_lines=self.cfg.ui.scrollback_lines,
+        )
+        win.panes[idx] = new_sess
+        self._mark()
+        return True
+
+    def send_keys(self, text: str) -> None:
+        s = self.active_session()
+        s.write_text(text)
+
     def sync_geometry(self, content_rows: int, content_cols: int) -> None:
+        self._content_rows = content_rows
+        self._content_cols = content_cols
         win = self._window()
         total_rows = max(self.cfg.ui.min_pane_rows, content_rows)
         total_cols = max(self.cfg.ui.min_pane_cols, content_cols)
@@ -468,21 +654,42 @@ class Session:
     def next_window(self) -> None:
         if len(self.windows) <= 1:
             return
+        self._last_window = self.current_window
         self.current_window = (self.current_window + 1) % len(self.windows)
         self._mark()
 
     def prev_window(self) -> None:
         if len(self.windows) <= 1:
             return
+        self._last_window = self.current_window
         self.current_window = (self.current_window - 1) % len(self.windows)
         self._mark()
 
     def goto_window(self, n: int) -> bool:
         if 0 <= n < len(self.windows):
+            self._last_window = self.current_window
             self.current_window = n
             self._mark()
             return True
         return False
+
+    def last_window(self) -> None:
+        if len(self.windows) <= 1:
+            return
+        prev = self._last_window
+        self._last_window = self.current_window
+        self.current_window = prev
+        self._mark()
+
+    def last_pane(self) -> None:
+        win = self._window()
+        prev = self._last_pane
+        order = pane_indices(win.tree)
+        if prev not in order:
+            return
+        self._last_pane = win.focus_pane
+        win.focus_pane = prev
+        self._mark()
 
     def rename_window(self, name: str) -> None:
         self.windows[self.current_window].name = name
@@ -575,13 +782,17 @@ class Session:
             if t.name == template_name:
                 tpl = t
                 break
-        if tpl is None:
+
+        from plmux.extensions.registry import get_layout_algorithm
+        plugin_algo = get_layout_algorithm(template_name)
+
+        if tpl is None and plugin_algo is None:
             return False
 
         win = self._window()
         current_indices = pane_indices(win.tree)
         current_n = len(current_indices)
-        needed = tpl.min_panes
+        needed = tpl.min_panes if tpl else 1
 
         while current_n < needed:
             win.panes.append(self._make_session(24, 80, shell=self.cfg.shell, env=self.env))
@@ -613,6 +824,16 @@ class Session:
             return 0
         if n == 1:
             return panes[0]
+
+        from plmux.extensions.registry import get_layout_algorithm
+        plugin_algo = get_layout_algorithm(name)
+        if plugin_algo is not None:
+            try:
+                result = plugin_algo(n, 80, 24)
+                if result is not None:
+                    return result
+            except Exception:
+                pass
 
         if name == "even-horizontal":
             return self._build_even_horizontal(panes)
@@ -871,6 +1092,24 @@ class TmuxServer:
     def focus_prev(self) -> None:
         self._session().focus_prev()
 
+    def focus_direction(self, direction: str) -> None:
+        self._session().focus_direction(direction)
+
+    def swap_pane(self, direction: str) -> None:
+        self._session().swap_pane(direction)
+
+    def break_pane(self, pane_idx: int | None = None) -> bool:
+        return self._session().break_pane(pane_idx)
+
+    def join_pane(self, direction: str = "row") -> bool:
+        return self._session().join_pane(direction)
+
+    def respawn_pane(self, pane_idx: int | None = None) -> bool:
+        return self._session().respawn_pane(pane_idx)
+
+    def send_keys(self, text: str) -> None:
+        self._session().send_keys(text)
+
     def toggle_zoom(self) -> None:
         self._session().toggle_zoom()
 
@@ -912,6 +1151,12 @@ class TmuxServer:
 
     def prev_window(self) -> None:
         self._session().prev_window()
+
+    def last_window(self) -> None:
+        self._session().last_window()
+
+    def last_pane(self) -> None:
+        self._session().last_pane()
 
     def goto_window(self, n: int) -> bool:
         return self._session().goto_window(n)

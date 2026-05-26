@@ -31,14 +31,19 @@ def save_session(
 ) -> None:
     if not cfg.session.auto_save:
         return
+    from plmux.extensions.registry import run_session_hooks, SessionHookContext
+    pre_ctx = SessionHookContext(action="save", data=dict(extra_meta or {}))
+    plugin_data = run_session_hooks("pre_save", pre_ctx)
     path = resolve_state_path(cfg)
     path.parent.mkdir(parents=True, exist_ok=True)
+    meta = dict(extra_meta or {})
+    meta.update(plugin_data)
     snap = SessionSnapshot(
         tree=tree_to_json(tree),
         focus_pane=focus_pane,
         shell=list(shell) if shell else None,
         cwd=cwd,
-        meta=dict(extra_meta or {}),
+        meta=meta,
         buffer_dumps=dict(buffer_dumps) if buffer_dumps else None,
         sessions_data=sessions_data or [],
         current_session=current_session,
@@ -47,13 +52,22 @@ def save_session(
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(snap.to_json(), f, indent=2, ensure_ascii=False)
     tmp.replace(path)
+    post_ctx = SessionHookContext(action="save", data={"path": str(path)})
+    run_session_hooks("post_save", post_ctx)
 
 
 def load_session(cfg: PlmuxConfig) -> SessionSnapshot | None:
     path = resolve_state_path(cfg)
     if not path.is_file():
         return None
+    from plmux.extensions.registry import run_session_hooks, SessionHookContext
+    pre_ctx = SessionHookContext(action="load", data={"path": str(path)})
+    run_session_hooks("pre_load", pre_ctx)
     with open(path, encoding="utf-8") as f:
         data = json.load(f)
     snap = SessionSnapshot.from_json(data)
+    post_ctx = SessionHookContext(action="load", data={"path": str(path), "session_name": snap.meta.get("name", "")})
+    plugin_data = run_session_hooks("post_load", post_ctx)
+    if plugin_data:
+        snap.meta.update(plugin_data)
     return snap
