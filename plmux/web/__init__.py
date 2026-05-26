@@ -451,7 +451,6 @@ class WebClientServer:
                     win = self.ws_ref._window()
                     if 0 <= pane_idx < len(win.panes):
                         self.ws_ref.focus_pane = pane_idx
-                        from plmux.web.server import _last_layout_sig
                         import plmux.web.server as srv
                         srv._last_layout_sig = ""
                 except Exception:
