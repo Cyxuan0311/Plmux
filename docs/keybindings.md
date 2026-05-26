@@ -16,6 +16,8 @@ The default prefix is `Ctrl+B`. You can change it in `config.json`:
 
 Supported prefix values: `ctrl+b`, `ctrl+a`, `c-b`, `c-a`, `^b`, `^a`.
 
+Pressing the prefix key twice (e.g. `Ctrl+B` `Ctrl+B`) sends the prefix key itself to the child program.
+
 Implementation: [schema.py](../plmux/config/schema.py) | [prefix.py](../plmux/modes/prefix.py)
 
 ## Pane Management
@@ -26,11 +28,15 @@ Implementation: [schema.py](../plmux/config/schema.py) | [prefix.py](../plmux/mo
 | Horizontal split | `"` or `s` | Split the current pane stacked |
 | Only this pane | `o` | Close all other panes, keep only the current one |
 | Zoom pane | `z` | Toggle the current pane to fullscreen and back |
-| Focus left | `h` | Move focus to the previous pane |
-| Focus right | `l` | Move focus to the next pane |
-| Focus up | `k` | Move focus to the previous pane |
-| Focus down | `j` | Move focus to the next pane |
-| Focus (arrow keys) | `←` `→` `↑` `↓` | Move focus with arrow keys |
+| Kill pane | `x` | Close the current pane (close window if last pane) |
+| Swap pane up | `{` | Swap current pane with the one above |
+| Swap pane down | `}` | Swap current pane with the one below |
+| Break pane | `!` | Break the current pane out into its own window |
+| Focus left | `h` | Move focus to the left pane (spatial direction) |
+| Focus right | `l` | Move focus to the right pane (spatial direction) |
+| Focus up | `k` | Move focus to the pane above (spatial direction) |
+| Focus down | `j` | Move focus to the pane below (spatial direction) |
+| Focus (arrow keys) | `←` `→` `↑` `↓` | Move focus with arrow keys (spatial direction) |
 | Resize left | `H` | Shrink the pane from the left edge |
 | Resize right | `L` | Expand the pane to the right |
 | Resize up | `K` | Shrink the pane from the top edge |
@@ -55,6 +61,7 @@ Implementation: [schema.py](../plmux/config/schema.py) | [prefix.py](../plmux/mo
 | Show help | `?` | Open the help overlay |
 | Detach session | `d` | Detach from the session (session continues in background) |
 | Enter command line | `:` | Open the `:` command prompt |
+| Send prefix key | Prefix+Prefix | Send the prefix key to the child program |
 
 ## Direct Keys (No Prefix)
 
@@ -107,7 +114,7 @@ Implementation: [copy_mode.py](../plmux/modes/copy_mode.py)
 
 ## Command Line Mode
 
-Press `Prefix` then `:` to enter command mode. Use `Tab` for auto-completion.
+Press `Prefix` then `:` to enter command mode. Use `Tab` for auto-completion, `↑` `↓` to browse command history.
 
 Implementation: [commands.py](../plmux/input/commands.py)
 
@@ -118,6 +125,12 @@ Implementation: [commands.py](../plmux/input/commands.py)
 | `:vsplit`, `:vsp`, `:vs` | Vertical split |
 | `:only` | Keep only current pane |
 | `:focus <n>` | Focus pane by index |
+| `:kill-pane [n]`, `:killp` | Kill pane (close window if last pane) |
+| `:swap-pane [up\|down]`, `:swapp` | Swap current pane with neighbor |
+| `:break-pane`, `:breakp` | Break pane into its own window |
+| `:join-pane [h\|v]`, `:joinp` | Join pane from next window |
+| `:respawn-pane [n]`, `:respawnp` | Respawn dead pane (restart shell) |
+| `:send-keys <text>`, `:sendk` | Send text to active pane |
 | `:theme <name>` | Change theme |
 | `:theme list` | Open theme browser |
 | `:layout` | Open layout browser |
@@ -128,6 +141,23 @@ Implementation: [commands.py](../plmux/input/commands.py)
 | `:plugins` | Open plugin manager |
 | `:reload`, `:source` | Reload configuration and load newly enabled plugins |
 | `:help` | Show help overlay |
+
+## Dead Panes
+
+When a process inside a pane exits and `remain_on_exit` is enabled, the pane is preserved with a `[PROCESS EXITED]` indicator. You can then:
+
+- Press `Prefix+x` to kill the pane
+- Type `:respawn-pane` to restart the shell in the pane
+
+Enable in `config.json`:
+
+```json
+{
+  "ui": {
+    "remain_on_exit": true
+  }
+}
+```
 
 ## Theme List Mode
 
@@ -202,6 +232,10 @@ Key bindings can be customized in `config.json` under `keys.bindings`:
       "resize-up": ["K"],
       "resize-down": ["J"],
       "zoom": ["z"],
+      "kill-pane": ["x"],
+      "swap-pane-up": ["{"],
+      "swap-pane-down": ["}"],
+      "break-pane": ["!"],
       "command-line": [":"]
     }
   }
@@ -225,15 +259,19 @@ Each action maps to a list of keys. The first matching key triggers the action. 
 | `cycle-layout` | Cycle layout templates |
 | `help` | Show help overlay |
 | `detach` | Detach from session |
-| `focus-left` | Focus previous pane |
-| `focus-right` | Focus next pane |
-| `focus-up` | Focus previous pane |
-| `focus-down` | Focus next pane |
+| `focus-left` | Focus left pane (spatial direction) |
+| `focus-right` | Focus right pane (spatial direction) |
+| `focus-up` | Focus pane above (spatial direction) |
+| `focus-down` | Focus pane below (spatial direction) |
 | `resize-left` | Resize pane left |
 | `resize-right` | Resize pane right |
 | `resize-up` | Resize pane up |
 | `resize-down` | Resize pane down |
 | `zoom` | Toggle pane zoom |
+| `kill-pane` | Kill current pane |
+| `swap-pane-up` | Swap with pane above |
+| `swap-pane-down` | Swap with pane below |
+| `break-pane` | Break pane into its own window |
 | `command-line` | Enter command-line mode |
 
 Implementation: [schema.py](../plmux/config/schema.py) | [prefix.py](../plmux/modes/prefix.py)
