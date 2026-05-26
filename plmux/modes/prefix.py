@@ -26,6 +26,11 @@ def handle_prefix_mode(key, ctx: AppContext) -> None:
     ctx.mode = "normal"
     ch = str(key)
 
+    if key == ctx.prefix_key:
+        from plmux.input.keymap import send_keystroke_to_session
+        send_keystroke_to_session(ctx.ws.active_session(), key)
+        return
+
     key_map = _build_key_action_map(ctx.cfg.keys.bindings)
     action = key_map.get(ch) or key_map.get(key.name or "")
 
@@ -88,21 +93,21 @@ def handle_prefix_mode(key, ctx: AppContext) -> None:
         ctx.detach_requested = True
         ctx.running = False
     elif action == "focus-left":
-        ctx.ws.focus_prev()
+        ctx.ws.focus_direction("left")
         if _send:
-            _send({"action": "focus_prev"})
+            _send({"action": "focus_direction", "direction": "left"})
     elif action == "focus-right":
-        ctx.ws.focus_next()
+        ctx.ws.focus_direction("right")
         if _send:
-            _send({"action": "focus_next"})
+            _send({"action": "focus_direction", "direction": "right"})
     elif action == "focus-up":
-        ctx.ws.focus_prev()
+        ctx.ws.focus_direction("up")
         if _send:
-            _send({"action": "focus_prev"})
+            _send({"action": "focus_direction", "direction": "up"})
     elif action == "focus-down":
-        ctx.ws.focus_next()
+        ctx.ws.focus_direction("down")
         if _send:
-            _send({"action": "focus_next"})
+            _send({"action": "focus_direction", "direction": "down"})
     elif action == "resize-left":
         ctx.ws.resize_pane("left")
         if _send:
@@ -135,6 +140,18 @@ def handle_prefix_mode(key, ctx: AppContext) -> None:
         ctx.ws.rotate_panes("up")
         if _send:
             _send({"action": "rotate_panes", "direction": "up"})
+    elif action == "kill-pane":
+        _kill_current_pane(ctx)
+    elif action == "swap-pane-up":
+        ctx.ws.swap_pane("up")
+        if _send:
+            _send({"action": "swap_pane", "direction": "up"})
+    elif action == "swap-pane-down":
+        ctx.ws.swap_pane("down")
+        if _send:
+            _send({"action": "swap_pane", "direction": "down"})
+    elif action == "break-pane":
+        _break_pane(ctx)
     elif action == "clock-mode":
         if ctx.clock_mode_pane is not None:
             ctx.clock_mode_pane = None
@@ -170,7 +187,46 @@ def handle_prefix_mode(key, ctx: AppContext) -> None:
     elif action == "rename-session":
         ctx.mode = "cmdline"
         ctx.cmd_buffer = "rename-session "
+    elif action == "last-window":
+        ctx.ws.last_window()
+        if _send:
+            _send({"action": "last_window"})
+    elif action == "last-pane":
+        ctx.ws.last_pane()
+        if _send:
+            _send({"action": "last_pane"})
+    elif action == "display-panes":
+        import time as _time
+        ctx.display_panes_active = True
+        ctx.display_panes_until = _time.monotonic() + 3.0
     ctx.dirty = True
+
+
+def _kill_current_pane(ctx: AppContext) -> None:
+    _send = ctx.send_remote_command
+    win = ctx.ws._window()
+    if len(win.panes) <= 1:
+        if not ctx.ws.close_window():
+            ctx.hard_quit_requested = True
+            ctx.running = False
+        elif _send:
+            _send({"action": "close_window"})
+        return
+    pane_idx = ctx.ws.focus_pane
+    ctx.ws.remove_pane(pane_idx)
+    if _send:
+        _send({"action": "kill_pane", "pane_index": pane_idx})
+
+
+def _break_pane(ctx: AppContext) -> None:
+    _send = ctx.send_remote_command
+    win = ctx.ws._window()
+    if len(win.panes) <= 1:
+        return
+    pane_idx = ctx.ws.focus_pane
+    ctx.ws.break_pane(pane_idx)
+    if _send:
+        _send({"action": "break_pane", "pane_index": pane_idx})
 
 
 def _enter_copy_mode(ctx: AppContext) -> None:

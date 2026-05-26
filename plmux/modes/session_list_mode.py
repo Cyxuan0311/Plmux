@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from plmux.modes import AppContext
-from plmux.ui.session_list_overlay import get_item_at, get_item_count, _TAB_SESSIONS, _TAB_WINDOWS, _NUM_TABS
+from plmux.ui.session_list_overlay import get_item_at, get_item_count, _TAB_SESSIONS, _TAB_WINDOWS, _TAB_TREE, _NUM_TABS, _build_tree_rows
 
 
 def handle_session_list_mode(key, ctx: AppContext) -> None:
@@ -54,6 +54,8 @@ def handle_session_list_mode(key, ctx: AppContext) -> None:
                 ws.current_window = item["idx"]
                 if ctx.send_remote_command:
                     ctx.send_remote_command({"action": "goto_window", "index": item["idx"]})
+            elif active_tab == _TAB_TREE:
+                _tree_navigate(ws, ctx, ctx.session_list_cursor)
         ctx.mode = "normal"
         ctx.dirty = True
     elif ch == "d":
@@ -76,4 +78,62 @@ def handle_session_list_mode(key, ctx: AppContext) -> None:
                     ctx.send_remote_command({"action": "close_window_by_index", "index": item["idx"]})
                 n_after = get_item_count(ws, active_tab)
                 ctx.session_list_cursor = min(ctx.session_list_cursor, max(0, n_after - 1))
+            elif active_tab == _TAB_TREE:
+                _tree_kill(ws, ctx, ctx.session_list_cursor)
         ctx.dirty = True
+
+
+def _tree_navigate(ws, ctx, cursor: int) -> None:
+    rows = _build_tree_rows(ws)
+    if not rows or cursor >= len(rows):
+        return
+    prefix, label, _ = rows[cursor]
+    if label.startswith("S"):
+        parts = label.split()
+        if parts:
+            try:
+                idx = int(parts[0][1:])
+                ws.switch_session(idx)
+                if ctx.send_remote_command:
+                    ctx.send_remote_command({"action": "switch_session", "index": idx})
+            except (ValueError, IndexError):
+                pass
+    elif label.startswith("W"):
+        parts = label.split()
+        if parts:
+            try:
+                idx = int(parts[0][1:])
+                ws.current_window = idx
+                if ctx.send_remote_command:
+                    ctx.send_remote_command({"action": "goto_window", "index": idx})
+            except (ValueError, IndexError):
+                pass
+    elif label.startswith("P"):
+        parts = label.split()
+        if parts:
+            try:
+                idx = int(parts[0][1:])
+                win = ws._window()
+                if idx < len(win.panes):
+                    win.focus_pane = idx
+                    if ctx.send_remote_command:
+                        ctx.send_remote_command({"action": "focus", "index": idx})
+            except (ValueError, IndexError):
+                pass
+
+
+def _tree_kill(ws, ctx, cursor: int) -> None:
+    rows = _build_tree_rows(ws)
+    if not rows or cursor >= len(rows):
+        return
+    prefix, label, _ = rows[cursor]
+    if label.startswith("P") and "[DEAD]" in label:
+        parts = label.split()
+        if parts:
+            try:
+                idx = int(parts[0][1:])
+                ws.kill_pane(idx)
+                if ctx.send_remote_command:
+                    ctx.send_remote_command({"action": "kill_pane", "index": idx})
+            except (ValueError, IndexError):
+                pass

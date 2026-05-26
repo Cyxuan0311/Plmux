@@ -16,6 +16,9 @@ class AppContext:
 
     mode: str = "normal"
     cmd_buffer: str = ""
+    cmd_history: list[str] = field(default_factory=list)
+    cmd_history_pos: int = -1
+    cmd_history_draft: str = ""
     help_tab: int = 0
     help_scroll_offset: int = 0
     theme_list_cursor: int = 0
@@ -69,6 +72,13 @@ class AppContext:
     theme_search_query: str = ""
 
     plugin_state: dict = field(default_factory=dict)
+
+    display_panes_active: bool = False
+    display_panes_until: float = 0.0
+
+    statusbar_style_cursor: int = 0
+
+    pane_border_style_cursor: int = 0
 
     send_remote_command: Callable[[dict], None] | None = None
 

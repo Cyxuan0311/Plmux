@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from plmux.config.loader import save_user_config
-from plmux.extensions.registry import discover_plugins, is_plugin_loaded, load_plugins
+from plmux.extensions.registry import discover_plugins, is_plugin_loaded, load_plugins, unload_plugin
 from plmux.modes import AppContext
 
 
@@ -53,6 +53,8 @@ def handle_plugin_list_mode(key, ctx: AppContext) -> None:
                 enabled.remove(plugin_name)
                 ctx.cfg.extensions.enabled = enabled
                 save_user_config(ctx.cfg, None)
+                if is_plugin_loaded(plugin_name):
+                    unload_plugin(plugin_name)
             else:
                 enabled.append(plugin_name)
                 ctx.cfg.extensions.enabled = enabled

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from plmux.config.loader import load_config, save_user_config
-from plmux.extensions.registry import load_plugins
+from plmux.extensions.registry import load_plugins, set_plugin_settings
 from plmux.input.commands import get_completions, run_command_line
 from plmux.modes import AppContext
 
@@ -51,6 +51,8 @@ def handle_cmdline_mode(key, ctx: AppContext) -> None:
     if key.name == "KEY_ESCAPE":
         ctx.mode = "normal"
         ctx.cmd_buffer = ""
+        ctx.cmd_history_pos = -1
+        ctx.cmd_history_draft = ""
         ctx.completion_hints = ""
         ctx.dirty = True
     elif not key.is_sequence and str(key) == "\x04":
@@ -61,6 +63,14 @@ def handle_cmdline_mode(key, ctx: AppContext) -> None:
         ctx.completion_hints = hints
         ctx.dirty = True
     elif key in ("\n", "\r") or key.name == "KEY_ENTER":
+        cmd_text = ctx.cmd_buffer.strip()
+        if cmd_text:
+            if not ctx.cmd_history or ctx.cmd_history[-1] != cmd_text:
+                ctx.cmd_history.append(cmd_text)
+            if len(ctx.cmd_history) > 200:
+                ctx.cmd_history = ctx.cmd_history[-200:]
+        ctx.cmd_history_pos = -1
+        ctx.cmd_history_draft = ""
         res = run_command_line(ctx.ws, ctx.cmd_buffer)
         ctx.cmd_buffer = ""
         ctx.completion_hints = ""
@@ -81,6 +91,12 @@ def handle_cmdline_mode(key, ctx: AppContext) -> None:
         if res.show_session_list:
             ctx.mode = "session_list"
             ctx.session_list_cursor = 0
+        if res.show_statusbar_style:
+            ctx.mode = "statusbar_style"
+            ctx.statusbar_style_cursor = 0
+        if res.show_pane_border_style:
+            ctx.mode = "pane_border_style"
+            ctx.pane_border_style_cursor = 0
         if res.show_plugin_list:
             ctx.mode = "plugin_list"
             ctx.plugin_list_cursor = 0
@@ -153,13 +169,42 @@ def handle_cmdline_mode(key, ctx: AppContext) -> None:
             handler = get_plugin_mode_handler(res.plugin_overlay)
             if handler and hasattr(handler, "_on_enter"):
                 handler._on_enter(ctx)
-        if res.remote_command and ctx.send_remote_command:
+        if res.show_options:
+            ctx.cmd_buffer = res.message or ""
+            ctx.mode = "cmdline"
+        if res.remote_command:
             cmd = res.remote_command
-            if cmd.get("action") == "split" and "rows" not in cmd:
-                cmd["rows"] = ctx.content_rows
-                cmd["cols"] = ctx.content_cols
-            ctx.send_remote_command(cmd)
+            if cmd.get("action") == "display_panes":
+                import time as _time
+                ctx.display_panes_active = True
+                ctx.display_panes_until = _time.monotonic() + 3.0
+                ctx.dirty = True
+            elif ctx.send_remote_command:
+                if cmd.get("action") == "split" and "rows" not in cmd:
+                    cmd["rows"] = ctx.content_rows
+                    cmd["cols"] = ctx.content_cols
+                ctx.send_remote_command(cmd)
         ctx.dirty = True
+    elif key.name == "KEY_UP":
+        if ctx.cmd_history:
+            if ctx.cmd_history_pos == -1:
+                ctx.cmd_history_draft = ctx.cmd_buffer
+                ctx.cmd_history_pos = len(ctx.cmd_history) - 1
+            elif ctx.cmd_history_pos > 0:
+                ctx.cmd_history_pos -= 1
+            ctx.cmd_buffer = ctx.cmd_history[ctx.cmd_history_pos]
+            ctx.completion_hints = ""
+            ctx.dirty = True
+    elif key.name == "KEY_DOWN":
+        if ctx.cmd_history_pos >= 0:
+            if ctx.cmd_history_pos < len(ctx.cmd_history) - 1:
+                ctx.cmd_history_pos += 1
+                ctx.cmd_buffer = ctx.cmd_history[ctx.cmd_history_pos]
+            else:
+                ctx.cmd_history_pos = -1
+                ctx.cmd_buffer = ctx.cmd_history_draft
+            ctx.completion_hints = ""
+            ctx.dirty = True
     elif key.name in ("KEY_BACKSPACE", "KEY_DELETE"):
         ctx.cmd_buffer = ctx.cmd_buffer[:-1]
         ctx.completion_hints = ""
@@ -186,6 +231,7 @@ def _do_reload_config(ctx: AppContext) -> None:
         new_enabled = set(new_cfg.extensions.enabled)
         to_load = new_enabled - old_enabled
         if to_load:
+            set_plugin_settings(new_cfg.extensions.plugin_settings)
             load_plugins(list(to_load), new_cfg.extensions.search_paths)
     except Exception:
         pass

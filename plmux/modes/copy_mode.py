@@ -266,6 +266,7 @@ def handle_copy_mode(key, ctx: AppContext) -> None:
         if ctx.copy_anchor is not None and ctx.copy_cursor is not None:
             text = _extract_selected_text(s, ctx.copy_anchor, ctx.copy_cursor, ctx.copy_scroll_offset, rect_mode=ctx.copy_rect_mode)
             _copy_to_clipboard(text)
+            ctx.ws.buffers.set(text)
         _exit_copy_mode(ctx, s)
         return
 

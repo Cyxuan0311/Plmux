@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from plmux.extensions.registry import get_plugin_mode_handler
+from plmux.extensions.registry import get_plugin_mode_handler, apply_input_filters
 from plmux.modes import AppContext
 from plmux.modes.normal import handle_normal_mode
 from plmux.modes.prefix import handle_prefix_mode
@@ -13,6 +13,8 @@ from plmux.modes.theme_list_mode import handle_theme_list_mode
 from plmux.modes.session_list_mode import handle_session_list_mode
 from plmux.modes.plugin_list_mode import handle_plugin_list_mode
 from plmux.modes.layout_list_mode import handle_layout_list_mode
+from plmux.modes.statusbar_style_mode import handle_statusbar_style_mode
+from plmux.modes.pane_border_style_mode import handle_pane_border_style_mode
 from plmux.utils.event_bus import get_event_bus
 
 
@@ -26,12 +28,15 @@ _MODE_HANDLERS = {
     "session_list": handle_session_list_mode,
     "plugin_list": handle_plugin_list_mode,
     "layout_list": handle_layout_list_mode,
+    "statusbar_style": handle_statusbar_style_mode,
+    "pane_border_style": handle_pane_border_style_mode,
     "esc_wait": handle_normal_mode,
 }
 
 
 def dispatch_key(key, ctx: AppContext) -> None:
     prev_mode = ctx.mode
+    filtered_key = apply_input_filters(key, prev_mode)
     handler = _MODE_HANDLERS.get(ctx.mode)
     if handler is None:
         plugin_handler = get_plugin_mode_handler(ctx.mode)
@@ -39,7 +44,7 @@ def dispatch_key(key, ctx: AppContext) -> None:
             handler = plugin_handler
         else:
             handler = handle_normal_mode
-    handler(key, ctx)
+    handler(filtered_key, ctx)
     if ctx.mode != prev_mode:
         try:
             bus = get_event_bus()
