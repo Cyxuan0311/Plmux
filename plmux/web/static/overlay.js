@@ -7,6 +7,48 @@ var _state = null;
 
 export function initOverlay(state) {
   _state = state;
+
+  var overlayContainer = document.getElementById("overlay-container");
+  if (overlayContainer) {
+    overlayContainer.addEventListener("mousedown", function(e) {
+      if (e.target === overlayContainer) {
+        e.preventDefault();
+        hide();
+      }
+    });
+  }
+}
+
+function _sizeOverlayPanel() {
+  if (!_term || !_fit) return;
+  var overlayPanel = document.getElementById("overlay-panel");
+  if (!overlayPanel) return;
+
+  var vw = window.innerWidth;
+  var vh = window.innerHeight;
+  var panelWidth = Math.min(vw * 0.85, 1200);
+  var panelHeight = Math.min(vh * 0.85, 800);
+
+  overlayPanel.style.width = panelWidth + "px";
+  overlayPanel.style.height = panelHeight + "px";
+
+  try { _fit.fit(); } catch(e) {}
+
+  var dims = _term._core._renderService.dimensions;
+  if (!dims || !dims.css || !dims.css.cell) return;
+  var charWidth = dims.css.cell.width;
+  var charHeight = dims.css.cell.height;
+  if (!charWidth || !charHeight) return;
+
+  var targetCols = Math.min(80, Math.floor((panelWidth - 16) / charWidth));
+  var targetRows = Math.min(24, Math.floor((panelHeight - 16) / charHeight));
+  var actualWidth = Math.ceil(charWidth * targetCols) + 16;
+  var actualHeight = Math.ceil(charHeight * targetRows) + 16;
+
+  overlayPanel.style.width = actualWidth + "px";
+  overlayPanel.style.height = actualHeight + "px";
+
+  try { _fit.fit(); } catch(e) {}
 }
 
 export function show(kind, content) {
@@ -18,6 +60,10 @@ export function show(kind, content) {
     return;
   }
 
+  _state.overlayVisible = true;
+  _state.overlayKind = kind;
+  overlayContainer.classList.remove("hidden");
+
   if (!_term) {
     var result = createTerminal(_state.currentTheme || {}, _state.termBg || "#1d2021");
     _term = result.term;
@@ -28,14 +74,13 @@ export function show(kind, content) {
     attachTerminalInputHandlers(_term);
   }
 
-  _state.overlayVisible = true;
-  _state.overlayKind = kind;
-  overlayContainer.classList.remove("hidden");
-  _term.clear();
-  _term.write(content);
+  requestAnimationFrame(function() {
+    _sizeOverlayPanel();
 
-  try { _fit.fit(); } catch(e) {}
-  _term.focus();
+    _term.reset();
+    _term.write(content);
+    _term.focus();
+  });
 }
 
 export function hide() {

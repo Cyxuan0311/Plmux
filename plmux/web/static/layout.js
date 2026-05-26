@@ -1,3 +1,6 @@
+import { applyStatusBarStyle } from "./statusbar.js";
+import { applyPaneBorderStyle } from "./panes.js";
+
 export function computeRects(node, x, y, w, h) {
   if (node.leaf !== undefined) {
     return [{ idx: node.leaf, x: x, y: y, w: w, h: h }];
@@ -23,6 +26,13 @@ export function applyLayout(msg, state, paneManager) {
   state.layoutTree = msg.tree;
   state.layoutPanes = msg.panes || [];
   state.currentFocus = msg.focus !== undefined ? msg.focus : 0;
+
+  if (msg.status_bar_style) {
+    applyStatusBarStyle(msg.status_bar_style);
+  }
+  if (msg.pane_border_style) {
+    applyPaneBorderStyle(msg.pane_border_style);
+  }
 
   var areaRect = paneManager.termArea.getBoundingClientRect();
   var areaW = areaRect.width;
@@ -69,6 +79,25 @@ export function applyLayout(msg, state, paneManager) {
     } catch(e) {}
   });
 
+  rects.forEach(function(r) {
+    var term = paneManager.terms[r.idx];
+    var container = document.getElementById("pane-" + r.idx);
+    if (!term || !container) return;
+    try {
+      var cellWidth = term._core._renderService.dimensions.css.cell.width;
+      if (cellWidth > 0) {
+        var actualWidth = Math.ceil(term.cols * cellWidth);
+        var borderW = container.querySelector(".pane-border");
+        var borderX = 0;
+        if (borderW) {
+          var cs = getComputedStyle(borderW);
+          borderX = parseFloat(cs.borderLeftWidth) + parseFloat(cs.borderRightWidth);
+        }
+        container.style.width = (actualWidth + borderX) + "px";
+      }
+    } catch(e) {}
+  });
+
   scheduleFit(paneManager);
 }
 
@@ -84,6 +113,27 @@ export function reposition(state, paneManager) {
       container.style.width = r.w + "px";
       container.style.height = r.h + "px";
     }
+  });
+  try {
+    paneManager.fitAll();
+  } catch(e) {}
+  rects.forEach(function(r) {
+    var term = paneManager.terms[r.idx];
+    var container = document.getElementById("pane-" + r.idx);
+    if (!term || !container) return;
+    try {
+      var cellWidth = term._core._renderService.dimensions.css.cell.width;
+      if (cellWidth > 0) {
+        var actualWidth = Math.ceil(term.cols * cellWidth);
+        var borderW = container.querySelector(".pane-border");
+        var borderX = 0;
+        if (borderW) {
+          var cs = getComputedStyle(borderW);
+          borderX = parseFloat(cs.borderLeftWidth) + parseFloat(cs.borderRightWidth);
+        }
+        container.style.width = (actualWidth + borderX) + "px";
+      }
+    } catch(e) {}
   });
 }
 

@@ -5,7 +5,12 @@ var _state = null;
 var _onMessage = null;
 var _reconnectTimer = null;
 var _reconnectAttempts = 0;
+var _snapshotIgnoreUntil = 0;
 var MAX_RECONNECT_DELAY = 16000;
+
+export function setSnapshotIgnoreUntil(ts) {
+  _snapshotIgnoreUntil = ts;
+}
 
 export function initConnection(state, onMessage) {
   _state = state;
@@ -25,6 +30,9 @@ export function connect() {
     if (_reconnectTimer) {
       clearTimeout(_reconnectTimer);
       _reconnectTimer = null;
+    }
+    if (_state.fitAllCallback) {
+      _state.fitAllCallback();
     }
     var cols = 80, rows = 24;
     if (_state.currentFocus in _state.terms) {
@@ -53,6 +61,7 @@ export function connect() {
       } else if (ev.data instanceof ArrayBuffer) {
         var bytes = new Uint8Array(ev.data);
         var text = new TextDecoder().decode(bytes);
+        if (Date.now() < _snapshotIgnoreUntil) return;
         if (_state.currentFocus in _state.terms) {
           _state.terms[_state.currentFocus].write(text);
         }

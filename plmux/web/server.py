@@ -208,6 +208,22 @@ def _build_layout_msg(ws: Any) -> dict[str, Any]:
         "panes": panes,
         "window": ws.current_window,
         "window_count": len(ws.windows),
+        "status_bar_style": {
+            "separator": ws.cfg.ui.status_bar_style.separator,
+            "mode_indicator": ws.cfg.ui.status_bar_style.mode_indicator,
+            "show_command": ws.cfg.ui.status_bar_style.show_command,
+            "show_session": ws.cfg.ui.status_bar_style.show_session,
+            "show_window_index": ws.cfg.ui.status_bar_style.show_window_index,
+            "show_pane_index": ws.cfg.ui.status_bar_style.show_pane_index,
+            "right_sections": ws.cfg.ui.status_bar_style.right_sections,
+            "spacing": ws.cfg.ui.status_bar_style.spacing,
+        },
+        "pane_border_style": {
+            "box_style": ws.cfg.ui.pane_border_style.box_style,
+            "show_title": ws.cfg.ui.pane_border_style.show_title,
+            "title_position": ws.cfg.ui.pane_border_style.title_position,
+            "active_indicator": ws.cfg.ui.pane_border_style.active_indicator,
+        },
     }
 
 
@@ -290,6 +306,38 @@ def _build_overlay_msg(ws: Any, ctx: Any) -> dict[str, Any] | None:
         return {"type": "overlay", "kind": "layout_list", "content": s.getvalue()}
     elif mode == "copy":
         return None
+    elif mode == "statusbar_style":
+        from plmux.ui.status_bar_style_overlay import build_status_bar_style_overlay
+        from rich.console import Console
+        import io
+
+        style_cfg = ws.cfg.ui.status_bar_style
+        panel = build_status_bar_style_overlay(
+            style_cfg,
+            ws.theme,
+            cursor=getattr(ctx, "statusbar_style_cursor", 0),
+            terminal_width=80,
+            terminal_height=24,
+        )
+        s = io.StringIO()
+        Console(file=s, force_terminal=True, width=80).print(panel)
+        return {"type": "overlay", "kind": "statusbar_style", "content": s.getvalue()}
+    elif mode == "pane_border_style":
+        from plmux.ui.pane_border_style_overlay import build_pane_border_style_overlay
+        from rich.console import Console
+        import io
+
+        style_cfg = ws.cfg.ui.pane_border_style
+        panel = build_pane_border_style_overlay(
+            style_cfg,
+            ws.theme,
+            cursor=getattr(ctx, "pane_border_style_cursor", 0),
+            terminal_width=80,
+            terminal_height=24,
+        )
+        s = io.StringIO()
+        Console(file=s, force_terminal=True, width=80).print(panel)
+        return {"type": "overlay", "kind": "pane_border_style", "content": s.getvalue()}
     return None
 
 
@@ -462,6 +510,10 @@ def _overlay_state_sig(ctx: Any) -> str:
         parts.append(str(ctx.plugin_list_cursor))
     elif mode == "layout_list":
         parts.append(str(ctx.layout_list_cursor))
+    elif mode == "statusbar_style":
+        parts.append(str(ctx.statusbar_style_cursor))
+    elif mode == "pane_border_style":
+        parts.append(str(ctx.pane_border_style_cursor))
     elif mode == "cmdline":
         parts.append(ctx.cmd_buffer)
     return "|".join(parts)

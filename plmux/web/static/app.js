@@ -47,6 +47,10 @@ document.addEventListener("DOMContentLoaded", function() {
     configurable: true
   });
 
+  state.fitAllCallback = function() {
+    paneManager.fitAll();
+  };
+
   var resizeObserver = new ResizeObserver(function() {
     scheduleFit(paneManager);
     reposition(state, paneManager);
@@ -59,9 +63,12 @@ document.addEventListener("DOMContentLoaded", function() {
   });
 
   paneManager.ensure(0);
-  setTimeout(function() { paneManager.fitAll(); }, 50);
-  setTimeout(function() { paneManager.fitAll(); }, 200);
-  setTimeout(function() { paneManager.fitAll(); }, 500);
+
+  document.fonts.ready.then(function() {
+    if (state.connected) {
+      paneManager.fitAll();
+    }
+  });
 
   connect();
 });

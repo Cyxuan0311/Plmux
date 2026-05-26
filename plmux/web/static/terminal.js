@@ -4,9 +4,9 @@ export function createTerminal(theme, termBg) {
   var xtheme = buildXtermTheme(theme, termBg);
   var t = new Terminal({
     theme: xtheme,
-    fontFamily: "'Cascadia Code','Fira Code','JetBrains Mono','SF Mono','Menlo',monospace",
-    fontSize: 14,
-    lineHeight: 1.0,
+    fontFamily: "'JetBrainsMono NFM', 'Symbols Nerd Font', monospace",
+    fontSize: 15,
+    lineHeight: 1.25,
     cursorBlink: true,
     cursorStyle: "block",
     scrollback: 5000,
