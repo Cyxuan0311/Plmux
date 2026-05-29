@@ -27,6 +27,10 @@ Then open `http://localhost:9888` (or your custom port) in a browser.
 - **Theme Sync**: The web client reflects the current plmux theme colors
 - **Status Bar**: Real-time display of mode, window, pane, and foreground command
 - **Paste Support**: Paste text from clipboard via the browser
+- **TLS/HTTPS**: Encrypted remote access via configurable SSL/TLS certificates
+- **Token Authentication**: Secure access with read-write and read-only tokens
+- **Session Routing**: Direct access to specific sessions via URL paths (e.g., `/session/my-session`)
+- **Read-Only Mode**: Share sessions for observation without allowing input
 
 ## Keyboard Support
 
@@ -48,6 +52,87 @@ The web client maps browser keyboard events to terminal escape sequences:
 | `Alt+<key>` | `\x1b<key>` |
 
 Implementation: [web/__init__.py](../plmux/web/__init__.py) — `_web_key_to_terminal()`
+
+## Remote Access
+
+plmux supports secure remote access to your terminal sessions from a browser or another terminal.
+
+### TLS/HTTPS
+
+To enable HTTPS, configure the TLS certificate and key in your config file:
+
+```json
+{
+  "web": {
+    "host": "0.0.0.0",
+    "port": 9888,
+    "tls_cert": "/path/to/cert.pem",
+    "tls_key": "/path/to/key.pem"
+  }
+}
+```
+
+When TLS is configured, the web server automatically uses HTTPS and the WebSocket connection upgrades to `wss://`. The minimum TLS version is 1.2.
+
+### Token Authentication
+
+Enable token-based authentication to restrict access:
+
+```json
+{
+  "web": {
+    "auth_enabled": true,
+    "tokens": ["my-secret-rw-token"],
+    "readonly_tokens": ["observer-token"]
+  }
+}
+```
+
+- **Read-write tokens** (`tokens`): Full terminal access including input
+- **Read-only tokens** (`readonly_tokens`): View-only access — all keyboard input, paste, and resize actions are blocked
+
+Tokens can be provided via:
+- URL query parameter: `https://server:9888/?token=my-secret-rw-token`
+- HTTP header: `Authorization: Bearer my-secret-rw-token`
+
+### Token Management Panel
+
+Use the `:web-token` command to open an interactive overlay panel for managing tokens:
+
+```
+:web-token
+```
+
+| Key | Action |
+|-----|--------|
+| `g` | Generate a read-write token |
+| `r` | Generate a read-only token |
+| `d` | Revoke the selected token |
+| `y` | Copy the last generated token to clipboard |
+| `↑` / `k` | Move cursor up |
+| `↓` / `j` | Move cursor down |
+| `Home` | Jump to top |
+| `G` | Jump to bottom |
+| `Esc` / `q` | Close panel |
+
+The panel displays all active tokens with their prefix, hash, and mode (read-write or read-only). Newly generated tokens are shown at the bottom of the panel and can be copied with `y`.
+
+### Session Routing
+
+Access a specific session directly via URL path:
+
+```
+https://server:9888/session/my-session?token=xxx
+```
+
+This opens the web client focused on the named session.
+
+### Status Indicators
+
+The web client status bar shows security indicators:
+
+- **🔒 TLS** — Shown when connected via HTTPS (green badge)
+- **🔒 READ-ONLY** — Shown when authenticated with a read-only token (red badge)
 
 ## Architecture
 
@@ -86,6 +171,8 @@ The web client communicates using JSON messages over WebSocket:
 | `paste` | `text` | Pasted text |
 | `ready` | `cols`, `rows` | Client initialized with terminal size |
 | `resize` | `cols`, `rows` | Browser window resized |
+| `focus` | `idx` | Focus changed to pane `idx` |
+| `resize_pane` | `idx`, `rows` | Resize pane `idx` to `rows` |
 
 **Server → Client:**
 
@@ -95,6 +182,10 @@ The web client communicates using JSON messages over WebSocket:
 | `snapshot` | `data` | Initial screen content on connection |
 | `status` | `mode`, `win`, `pane`, `cmd`, `clock`, `host` | Status bar update |
 | `theme` | `name`, `mode`, `status`, `pane`, `cmdline` | Theme color data |
+| `layout` | `tree`, `focus`, `panes` | Layout structure update |
+| `mode` | `mode`, `prev_mode` | Mode change notification |
+| `overlay` | `kind`, `content` | Overlay panel display |
+| `overlay_close` | | Close overlay panel |
 
 ### Output Pipeline
 
@@ -110,9 +201,12 @@ Implementation: [web/server.py](../plmux/web/server.py) — `_broadcast_loop()`
 ## Security Considerations
 
 - The web server binds to `0.0.0.0` by default, making it accessible from any network interface
-- For local-only access, start with `:web` and ensure your firewall blocks external access to port 9888
-- There is **no authentication** — anyone who can reach the port has full terminal access
-- Use with caution on shared or public networks
+- For local-only access, set `"host": "127.0.0.1"` in the web config or ensure your firewall blocks external access to port 9888
+- **Token authentication** is available — enable `auth_enabled` in the web config and configure `tokens` and `readonly_tokens`
+- **TLS/HTTPS** is supported — configure `tls_cert` and `tls_key` to encrypt all traffic
+- Without authentication enabled, anyone who can reach the port has full terminal access
+- Read-only tokens allow sharing sessions for observation without granting input capability
+- Tokens are stored as SHA-256 hashes — plaintext tokens are only shown once at generation time
 
 ## Limitations
 
