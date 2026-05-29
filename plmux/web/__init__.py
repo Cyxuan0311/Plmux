@@ -10,7 +10,6 @@ import os
 import secrets
 import ssl
 import threading
-import time
 from typing import Any, Callable, Optional
 from urllib.parse import parse_qs, urlparse
 

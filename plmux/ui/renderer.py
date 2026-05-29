@@ -18,6 +18,7 @@ from plmux.ui.theme_list_overlay import build_theme_list_overlay
 from plmux.ui.session_list_overlay import build_session_list_overlay
 from plmux.ui.plugin_list_overlay import build_plugin_list_overlay
 from plmux.ui.layout_list_overlay import build_layout_list_overlay
+from plmux.ui.web_token_overlay import build_web_token_overlay
 
 
 from plmux.ui.clock_overlay import build_clock_overlay
@@ -493,6 +494,10 @@ def build_root(
     plugin_enabled_names: list[str] | None = None,
     layout_list_active: bool = False,
     layout_list_cursor: int = 0,
+    layout_list_tab: int = 0,
+    layout_custom_cursor: int = 0,
+    layout_builder: dict | None = None,
+    custom_layouts: list | None = None,
     current_panes: int = 0,
     terminal_height: int = 24,
     clock_str: str = "",
@@ -510,6 +515,10 @@ def build_root(
     statusbar_style_cursor: int = 0,
     pane_border_style_active: bool = False,
     pane_border_style_cursor: int = 0,
+    web_token_active: bool = False,
+    web_token_cursor: int = 0,
+    web_token_last_generated: str | None = None,
+    web_token_last_mode: str | None = None,
 ) -> Layout:
     theme = ws.theme
     # support additional status indicators
@@ -650,6 +659,10 @@ def build_root(
             current_panes=current_panes,
             terminal_width=terminal_width,
             terminal_height=terminal_height,
+            tab=layout_list_tab,
+            custom_cursor=layout_custom_cursor,
+            builder=layout_builder,
+            custom_layouts=custom_layouts,
         )
         centered_layout = Align.center(layout_panel, vertical="middle")
 
@@ -708,6 +721,33 @@ def build_root(
         else:
             root.split_column(
                 Layout(centered_pb, name="main"),
+                Layout(status_text, name="status", size=1),
+                Layout(cmd, name="cmd", size=1),
+            )
+    elif web_token_active:
+        from plmux.web.server import _web_server
+        wt_tokens = _web_server.token_manager.list_tokens() if _web_server else []
+        wt_panel = build_web_token_overlay(
+            theme,
+            tokens=wt_tokens,
+            last_generated=web_token_last_generated,
+            last_generated_mode=web_token_last_mode,
+            cursor=web_token_cursor,
+            server_running=_web_server is not None,
+            terminal_width=terminal_width,
+            terminal_height=terminal_height,
+        )
+        centered_wt = Align.center(wt_panel, vertical="middle")
+
+        if status_position == "top":
+            root.split_column(
+                Layout(status_text, name="status", size=1),
+                Layout(centered_wt, name="main"),
+                Layout(cmd, name="cmd", size=1),
+            )
+        else:
+            root.split_column(
+                Layout(centered_wt, name="main"),
                 Layout(status_text, name="status", size=1),
                 Layout(cmd, name="cmd", size=1),
             )
