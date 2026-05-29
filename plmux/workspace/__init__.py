@@ -21,6 +21,7 @@ from plmux.workspace.server import TmuxServer
 from plmux.workspace.session import Session
 from plmux.workspace.snapshot import reindex_tree, try_load_snapshot
 from plmux.workspace.window import Window
+from plmux.terminal.session import TerminalSession
 
 PaneWorkspace = TmuxServer
 
@@ -30,6 +31,7 @@ __all__ = [
     "LayoutTemplate",
     "PaneWorkspace",
     "Session",
+    "TerminalSession",
     "TmuxServer",
     "Window",
     "build_custom_tree",
