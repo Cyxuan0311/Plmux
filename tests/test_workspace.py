@@ -19,7 +19,13 @@ class DummySession:
 
 
 def make_workspace(monkeypatch):
-    # Replace TerminalSession with DummySession to avoid spawning PTYs
+    # Replace TerminalSession with DummySession to avoid spawning PTYs.
+    # Mock at the actual import locations so all modules see the dummy.
+    monkeypatch.setattr("plmux.terminal.session.TerminalSession", DummySession)
+    monkeypatch.setattr("plmux.workspace.server.TerminalSession", DummySession)
+    monkeypatch.setattr("plmux.workspace.session.TerminalSession", DummySession)
+    monkeypatch.setattr("plmux.workspace.window.TerminalSession", DummySession)
+
     import plmux.workspace as workspace
     monkeypatch.setattr(workspace, "TerminalSession", DummySession)
     cfg = PlmuxConfig()
