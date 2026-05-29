@@ -1,15 +1,17 @@
 import { encodeKittyKey, hasModifiersToHandle, encodeSpecialKey, isSpecialKey, isFunctionKey, encodeFunctionKey, encodeCtrlKey } from "./keyboard.js";
-import { isMac } from "./utils.js";
+import { isMac, getAuthMode } from "./utils.js";
 
 var _sendFn = null;
 var _stateRef = null;
 var _paneManager = null;
 var _overlayTerm = null;
+var _readonly = false;
 
 export function initInputHandlers(paneManager, overlayTerm, state) {
   _stateRef = state;
   _paneManager = paneManager;
   _overlayTerm = overlayTerm;
+  _readonly = getAuthMode() === "ro";
   installImeBypass();
   installPasteHandler();
 }
@@ -18,6 +20,7 @@ export function attachTerminalInputHandlers(term) {
   term.attachCustomKeyEventHandler(function(ev) {
     if (ev.type !== "keydown") return true;
     if (!_sendFn || !_stateRef || !_stateRef.connected) return true;
+    if (_readonly) return true;
 
     if (ev.key === "V" && ev.ctrlKey && ev.shiftKey) {
       return true;
@@ -112,12 +115,12 @@ export function attachTerminalInputHandlers(term) {
   });
 
   term.onData(function(data) {
-    if (!_sendFn || !_stateRef || !_stateRef.connected) return;
+    if (!_sendFn || !_stateRef || !_stateRef.connected || _readonly) return;
     _send(data);
   });
 
   term.onBinary(function(data) {
-    if (!_sendFn || !_stateRef || !_stateRef.connected) return;
+    if (!_sendFn || !_stateRef || !_stateRef.connected || _readonly) return;
     var buffer = new Uint8Array(data.length);
     for (var i = 0; i < data.length; ++i) {
       buffer[i] = data.charCodeAt(i) & 255;
@@ -179,7 +182,7 @@ function installImeBypass() {
 
 function installPasteHandler() {
   document.addEventListener("paste", function(e) {
-    if (!_sendFn || !_stateRef || !_stateRef.connected) return;
+    if (!_sendFn || !_stateRef || !_stateRef.connected || _readonly) return;
     var inTerm = false;
     var el = e.target;
     while (el) {

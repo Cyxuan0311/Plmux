@@ -4,6 +4,7 @@ import { createPaneManager } from "./panes.js";
 import { initOverlay } from "./overlay.js";
 import { handleMessage } from "./messages.js";
 import { reposition, scheduleFit } from "./layout.js";
+import { getAuthMode, getSessionName } from "./utils.js";
 
 var state = {
   currentTheme: null,
@@ -21,6 +22,9 @@ var state = {
   terms: {},
   send: send,
   sendRaw: sendRaw,
+  authMode: getAuthMode(),
+  sessionName: getSessionName(),
+  readonly: getAuthMode() === "ro",
 };
 
 document.addEventListener("DOMContentLoaded", function() {

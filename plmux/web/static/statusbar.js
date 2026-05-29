@@ -7,6 +7,7 @@ var MODE_CLASS_MAP = {
   "THEME_LIST": "mode-theme_list",
   "SESSION_LIST": "mode-session_list",
   "PLUGIN_LIST": "mode-plugin_list",
+  "WEB_TOKEN": "mode-web_token",
   "LAYOUT_LIST": "mode-layout_list",
   "STATUSBAR_STYLE": "mode-statusbar_style",
   "PANE_BORDER_STYLE": "mode-pane_border_style",
@@ -189,6 +190,16 @@ export function updateStatus(m, state) {
   if (m.dead) {
     leftHtml += _makeSeg("DEAD:" + m.dead, "dead", "--bat-low-bg");
     leftHtml += _makeSepLeft(sepL, "--bat-low-bg", "--pane-bg");
+  }
+
+  if (window.__PLMUX_AUTH_MODE === "ro") {
+    leftHtml += _makeSeg("\uD83D\uDD12 READ-ONLY", "readonly", "--bat-low-bg");
+    leftHtml += _makeSepLeft(sepL, "--bat-low-bg", "--pane-bg");
+  }
+
+  if (window.location.protocol === "https:") {
+    leftHtml += _makeSeg("\uD83D\uDD12 TLS", "secure", "--bat-ok-bg");
+    leftHtml += _makeSepLeft(sepL, "--bat-ok-bg", "--pane-bg");
   }
 
   var rightItems = m.right_items || [];

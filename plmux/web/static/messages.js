@@ -5,7 +5,7 @@ import { updateMode, updateStatus, updateCmdline, applyStatusBarStyle } from "./
 import { applyPaneBorderStyle } from "./panes.js";
 import { setSnapshotIgnoreUntil } from "./connection.js";
 
-var OVERLAY_MODES = ["HELP", "THEME_LIST", "SESSION_LIST", "PLUGIN_LIST", "LAYOUT_LIST", "COPY", "STATUSBAR_STYLE", "PANE_BORDER_STYLE"];
+var OVERLAY_MODES = ["HELP", "THEME_LIST", "SESSION_LIST", "PLUGIN_LIST", "LAYOUT_LIST", "COPY", "STATUSBAR_STYLE", "PANE_BORDER_STYLE", "WEB_TOKEN", "CLOCK_MODE", "PET"];
 
 var _snapshotIgnoreUntil = 0;
 
@@ -86,7 +86,7 @@ function handleModeChange(newMode, prevMode, state, paneManager) {
   state.currentMode = newMode;
   updateMode(newMode);
 
-  if (OVERLAY_MODES.indexOf(newMode) === -1 && newMode !== "COPY") {
+  if (OVERLAY_MODES.indexOf(newMode) === -1) {
     hideOverlay();
   }
 

@@ -7,8 +7,12 @@ import hashlib
 import base64
 import json
 import os
+import secrets
+import ssl
 import threading
+import time
 from typing import Any, Callable, Optional
+from urllib.parse import parse_qs, urlparse
 
 _STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 
@@ -63,6 +67,75 @@ def reload_html() -> None:
     _CACHED_HTML = _load_html()
 
 
+def _hash_token(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+class TokenManager:
+    def __init__(self) -> None:
+        self._rw_hashes: dict[str, str] = {}
+        self._ro_hashes: dict[str, str] = {}
+
+    def generate(self, readonly: bool = False) -> str:
+        raw = secrets.token_urlsafe(32)
+        h = _hash_token(raw)
+        if readonly:
+            self._ro_hashes[h] = raw[:8]
+        else:
+            self._rw_hashes[h] = raw[:8]
+        return raw
+
+    def validate(self, token: str) -> Optional[str]:
+        h = _hash_token(token)
+        if h in self._rw_hashes:
+            return "rw"
+        if h in self._ro_hashes:
+            return "ro"
+        return None
+
+    def revoke(self, token: str) -> bool:
+        h = _hash_token(token)
+        if h in self._rw_hashes:
+            del self._rw_hashes[h]
+            return True
+        if h in self._ro_hashes:
+            del self._ro_hashes[h]
+            return True
+        return False
+
+    def load_config_tokens(self, tokens: list[str], readonly_tokens: list[str]) -> None:
+        for t in tokens:
+            h = _hash_token(t)
+            self._rw_hashes[h] = t[:8]
+        for t in readonly_tokens:
+            h = _hash_token(t)
+            self._ro_hashes[h] = t[:8]
+
+    def list_tokens(self) -> list[dict[str, str]]:
+        result: list[dict[str, str]] = []
+        for h, prefix in self._rw_hashes.items():
+            result.append({"prefix": prefix, "hash": h[:12] + "...", "mode": "read-write", "full_hash": h})
+        for h, prefix in self._ro_hashes.items():
+            result.append({"prefix": prefix, "hash": h[:12] + "...", "mode": "read-only", "full_hash": h})
+        return result
+
+    def token_count(self) -> int:
+        return len(self._rw_hashes) + len(self._ro_hashes)
+
+    def revoke_at(self, index: int) -> bool:
+        tokens = self.list_tokens()
+        if index < 0 or index >= len(tokens):
+            return False
+        h = tokens[index]["full_hash"]
+        if h in self._rw_hashes:
+            del self._rw_hashes[h]
+            return True
+        if h in self._ro_hashes:
+            del self._ro_hashes[h]
+            return True
+        return False
+
+
 class WebClientServer:
     def __init__(
         self,
@@ -71,11 +144,24 @@ class WebClientServer:
         host: str = "0.0.0.0",
         port: int = 9888,
         on_input: Optional[Callable] = None,
+        tls_cert: Optional[str] = None,
+        tls_key: Optional[str] = None,
+        auth_enabled: bool = False,
+        config_tokens: Optional[list[str]] = None,
+        config_readonly_tokens: Optional[list[str]] = None,
     ) -> None:
         self.ws_ref = workspace
         self.host = host
         self.port = port
         self.on_input = on_input
+        self.tls_cert = tls_cert
+        self.tls_key = tls_key
+        self.auth_enabled = auth_enabled
+        self.token_manager = TokenManager()
+        if config_tokens or config_readonly_tokens:
+            self.token_manager.load_config_tokens(
+                config_tokens or [], config_readonly_tokens or []
+            )
         self._server: Optional[asyncio.AbstractServer] = None
         self._clients: set[_SimpleWebSocket] = set()
         self._running = False
@@ -84,9 +170,18 @@ class WebClientServer:
         self._pane_drain_queue: asyncio.Queue | None = None
         self._drain_lock = threading.Lock()
 
+    def _build_ssl_context(self) -> Optional[ssl.SSLContext]:
+        if not self.tls_cert or not self.tls_key:
+            return None
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        ctx.load_cert_chain(self.tls_cert, self.tls_key)
+        ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+        return ctx
+
     async def start(self) -> None:
+        ssl_ctx = self._build_ssl_context()
         self._server = await asyncio.start_server(
-            self._handle_connection, self.host, self.port
+            self._handle_connection, self.host, self.port, ssl=ssl_ctx
         )
         self._running = True
         self._drain_queue = asyncio.Queue()
@@ -94,7 +189,10 @@ class WebClientServer:
         self._drain_tasks.append(asyncio.ensure_future(self._drain_loop()))
         self._drain_tasks.append(asyncio.ensure_future(self._pane_drain_loop()))
         addrs = ", ".join(str(s.getsockname()) for s in self._server.sockets)
-        print(f"[web] plmux web client listening on http://{addrs}")
+        scheme = "https" if ssl_ctx else "http"
+        print(f"[web] plmux web client listening on {scheme}://{addrs}")
+        if self.auth_enabled:
+            print(f"[web] authentication enabled, {len(self.token_manager._rw_hashes)} rw + {len(self.token_manager._ro_hashes)} ro tokens loaded")
 
     async def stop(self) -> None:
         self._running = False
@@ -261,6 +359,7 @@ class WebClientServer:
         request = request_line.decode("utf-8", errors="replace").strip()
         is_ws = False
         ws_key = ""
+        headers: dict[str, str] = {}
         while True:
             try:
                 line = await asyncio.wait_for(reader.readline(), timeout=3.0)
@@ -268,27 +367,83 @@ class WebClientServer:
                 break
             if line in (b"\r\n", b"\n", b""):
                 break
-            decoded = line.decode("utf-8", errors="replace").lower()
-            if "upgrade: websocket" in decoded:
+            decoded = line.decode("utf-8", errors="replace")
+            lower = decoded.lower()
+            if "upgrade: websocket" in lower:
                 is_ws = True
-            if decoded.startswith("sec-websocket-key:"):
-                ws_key = line.decode("utf-8", errors="replace").split(":", 1)[1].strip()
+            if lower.startswith("sec-websocket-key:"):
+                ws_key = decoded.split(":", 1)[1].strip()
+            if ":" in decoded:
+                k, v = decoded.split(":", 1)
+                headers[k.strip().lower()] = v.strip()
 
-        if is_ws and "/ws" in request:
-            await self._handle_ws(reader, writer, ws_key)
+        parsed = urlparse(request.split(" ", 2)[1] if " " in request else "/")
+        path = parsed.path
+        query = parse_qs(parsed.query)
+
+        if is_ws and "/ws" in path:
+            token_value = query.get("token", [None])[0]
+            auth_mode = self._check_auth(token_value, headers)
+            if self.auth_enabled and auth_mode is None:
+                await self._serve_401(writer)
+                return
+            await self._handle_ws(reader, writer, ws_key, auth_mode)
         elif request.startswith("GET / "):
-            await self._serve_html(writer)
+            token_value = query.get("token", [None])[0]
+            auth_mode = self._check_auth(token_value, headers)
+            if self.auth_enabled and auth_mode is None:
+                await self._serve_401_page(writer)
+                return
+            await self._serve_html(writer, auth_mode)
+        elif request.startswith("GET /session/"):
+            token_value = query.get("token", [None])[0]
+            auth_mode = self._check_auth(token_value, headers)
+            if self.auth_enabled and auth_mode is None:
+                await self._serve_401_page(writer)
+                return
+            session_name = path[len("/session/"):]
+            await self._serve_html(writer, auth_mode, session=session_name)
         elif request.startswith("GET /"):
-            path = request.split(" ", 2)[1].split("?")[0]
-            if path.startswith("/static/"):
-                await self._serve_static(writer, path)
+            path_only = path.split("?")[0]
+            if path_only.startswith("/static/"):
+                await self._serve_static(writer, path_only)
+            elif path_only == "/api/tokens" and self.auth_enabled:
+                await self._serve_token_api(writer, headers)
             else:
                 await self._serve_404(writer)
         else:
             await self._serve_404(writer)
 
-    async def _serve_html(self, writer: asyncio.StreamWriter) -> None:
-        body = _get_html().encode("utf-8")
+    def _check_auth(self, token: Optional[str], headers: dict[str, str]) -> Optional[str]:
+        if not self.auth_enabled:
+            return "rw"
+        if token:
+            mode = self.token_manager.validate(token)
+            if mode:
+                return mode
+        auth_header = headers.get("authorization", "")
+        if auth_header.startswith("Bearer "):
+            mode = self.token_manager.validate(auth_header[7:])
+            if mode:
+                return mode
+        return None
+
+    async def _serve_html(
+        self,
+        writer: asyncio.StreamWriter,
+        auth_mode: Optional[str] = None,
+        session: Optional[str] = None,
+    ) -> None:
+        html = _get_html()
+        inject_parts: list[str] = []
+        if auth_mode:
+            inject_parts.append(f'window.__PLMUX_AUTH_MODE="{auth_mode}";')
+        if session:
+            inject_parts.append(f'window.__PLMUX_SESSION="{session}";')
+        if inject_parts:
+            script_tag = "<script>" + "".join(inject_parts) + "</script>"
+            html = html.replace("</head>", script_tag + "</head>")
+        body = html.encode("utf-8")
         header = (
             "HTTP/1.1 200 OK\r\n"
             "Content-Type: text/html; charset=utf-8\r\n"
@@ -353,11 +508,73 @@ class WebClientServer:
         await writer.drain()
         writer.close()
 
+    async def _serve_401(self, writer: asyncio.StreamWriter) -> None:
+        body = b'{"error":"unauthorized"}'
+        header = (
+            "HTTP/1.1 401 Unauthorized\r\n"
+            "Content-Type: application/json\r\n"
+            "WWW-Authenticate: Bearer\r\n"
+            f"Content-Length: {len(body)}\r\n"
+            "Connection: close\r\n\r\n"
+        ).encode("utf-8")
+        writer.write(header + body)
+        await writer.drain()
+        writer.close()
+
+    async def _serve_401_page(self, writer: asyncio.StreamWriter) -> None:
+        body = (
+            "<html><head><title>401 Unauthorized</title></head>"
+            "<body style='background:#1d2021;color:#ebdbb2;display:flex;"
+            "justify-content:center;align-items:center;height:100vh;"
+            "font-family:monospace'>"
+            "<div style='text-align:center'>"
+            "<h1 style='color:#f92672'>401 Unauthorized</h1>"
+            "<p>Authentication required. Provide a valid token via "
+            "<code>?token=...</code> query parameter.</p>"
+            "</div></body></html>"
+        ).encode("utf-8")
+        header = (
+            "HTTP/1.1 401 Unauthorized\r\n"
+            "Content-Type: text/html; charset=utf-8\r\n"
+            "WWW-Authenticate: Bearer\r\n"
+            f"Content-Length: {len(body)}\r\n"
+            "Connection: close\r\n\r\n"
+        ).encode("utf-8")
+        writer.write(header + body)
+        await writer.drain()
+        writer.close()
+
+    async def _serve_token_api(self, writer: asyncio.StreamWriter, headers: dict[str, str]) -> None:
+        auth_header = headers.get("authorization", "")
+        if not auth_header.startswith("Bearer "):
+            await self._serve_401(writer)
+            return
+        mode = self.token_manager.validate(auth_header[7:])
+        if mode != "rw":
+            await self._serve_401(writer)
+            return
+        tokens = self.token_manager.list_tokens()
+        body = json.dumps({"tokens": tokens}).encode("utf-8")
+        header = (
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Type: application/json\r\n"
+            f"Content-Length: {len(body)}\r\n"
+            "Connection: close\r\n\r\n"
+        ).encode("utf-8")
+        writer.write(header + body)
+        await writer.drain()
+        writer.close()
+
     async def _handle_ws(
-        self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter, ws_key: str
+        self,
+        reader: asyncio.StreamReader,
+        writer: asyncio.StreamWriter,
+        ws_key: str,
+        auth_mode: Optional[str] = None,
     ) -> None:
         ws = _SimpleWebSocket(reader, writer)
         ws._ws_key = ws_key
+        ws._auth_mode = auth_mode or "rw"
         try:
             await ws.do_handshake()
         except Exception:
@@ -371,7 +588,7 @@ class WebClientServer:
                     msg = json.loads(raw)
                     await self._process_message(ws, msg)
                 except json.JSONDecodeError:
-                    if raw and self.on_input:
+                    if raw and self.on_input and ws._auth_mode == "rw":
                         self.on_input(raw)
                 except Exception:
                     pass
@@ -386,16 +603,23 @@ class WebClientServer:
 
     async def _process_message(self, ws: _SimpleWebSocket, msg: dict) -> None:
         msg_type = msg.get("type", "")
+        is_readonly = getattr(ws, "_auth_mode", "rw") == "ro"
 
         if msg_type == "input":
+            if is_readonly:
+                return
             data = msg.get("data", "")
             if data and self.on_input:
                 self.on_input(data)
         elif msg_type == "key":
+            if is_readonly:
+                return
             key_str = _web_key_to_terminal(msg)
             if key_str and self.on_input:
                 self.on_input(key_str)
         elif msg_type == "paste":
+            if is_readonly:
+                return
             text = msg.get("text", "")
             if text and self.on_input:
                 self.on_input(text)
@@ -445,6 +669,8 @@ class WebClientServer:
                     except Exception:
                         pass
         elif msg_type == "focus":
+            if is_readonly:
+                return
             pane_idx = msg.get("idx", -1)
             if self.ws_ref and pane_idx >= 0:
                 try:
@@ -456,6 +682,8 @@ class WebClientServer:
                 except Exception:
                     pass
         elif msg_type == "resize_pane":
+            if is_readonly:
+                return
             direction = msg.get("direction", "")
             if self.ws_ref and direction:
                 try:

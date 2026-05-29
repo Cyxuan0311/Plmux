@@ -227,117 +227,119 @@ def _build_layout_msg(ws: Any) -> dict[str, Any]:
     }
 
 
+def _render_rich_panel(panel: Any, tw: int, th: int) -> str:
+    from rich.console import Console
+    import io
+
+    s = io.StringIO()
+    Console(file=s, force_terminal=True, width=tw, height=th, legacy_windows=False).print(panel)
+    return s.getvalue().replace("\n", "\r\n")
+
+
 def _build_overlay_msg(ws: Any, ctx: Any) -> dict[str, Any] | None:
     mode = getattr(ws, "web_mode", "normal")
+    tw, th = 78, 24
+
     if mode == "help":
         from plmux.ui.help_overlay import build_help_overlay
-        from rich.console import Console
-        import io
 
         panel = build_help_overlay(
             ws.theme,
             active_tab=getattr(ctx, "help_tab", 0),
-            terminal_width=80,
-            terminal_height=24,
+            terminal_width=tw,
+            terminal_height=th,
         )
-        s = io.StringIO()
-        Console(file=s, force_terminal=True, width=80).print(panel)
-        return {"type": "overlay", "kind": "help", "content": s.getvalue()}
+        return {"type": "overlay", "kind": "help", "content": _render_rich_panel(panel, tw, th)}
     elif mode == "theme_list":
         from plmux.ui.theme_list_overlay import build_theme_list_overlay
-        from rich.console import Console
-        import io
 
         panel = build_theme_list_overlay(
             ws.theme,
             cursor=getattr(ctx, "theme_list_cursor", 0),
-            terminal_width=80,
-            terminal_height=24,
+            terminal_width=tw,
+            terminal_height=th,
             search_query=getattr(ctx, "theme_search_query", ""),
         )
-        s = io.StringIO()
-        Console(file=s, force_terminal=True, width=80).print(panel)
-        return {"type": "overlay", "kind": "theme_list", "content": s.getvalue()}
+        return {"type": "overlay", "kind": "theme_list", "content": _render_rich_panel(panel, tw, th)}
     elif mode == "session_list":
         from plmux.ui.session_list_overlay import build_session_list_overlay
-        from rich.console import Console
-        import io
 
         panel = build_session_list_overlay(
             ws,
             ws.theme,
             cursor=getattr(ctx, "session_list_cursor", 0),
-            terminal_width=80,
-            terminal_height=24,
+            terminal_width=tw,
+            terminal_height=th,
         )
-        s = io.StringIO()
-        Console(file=s, force_terminal=True, width=80).print(panel)
-        return {"type": "overlay", "kind": "session_list", "content": s.getvalue()}
+        return {"type": "overlay", "kind": "session_list", "content": _render_rich_panel(panel, tw, th)}
     elif mode == "plugin_list":
         from plmux.ui.plugin_list_overlay import build_plugin_list_overlay
-        from rich.console import Console
-        import io
 
         panel = build_plugin_list_overlay(
             ws.theme,
             search_paths=[],
             enabled_names=[],
             cursor=getattr(ctx, "plugin_list_cursor", 0),
-            terminal_width=80,
-            terminal_height=24,
+            terminal_width=tw,
+            terminal_height=th,
         )
-        s = io.StringIO()
-        Console(file=s, force_terminal=True, width=80).print(panel)
-        return {"type": "overlay", "kind": "plugin_list", "content": s.getvalue()}
+        return {"type": "overlay", "kind": "plugin_list", "content": _render_rich_panel(panel, tw, th)}
     elif mode == "layout_list":
         from plmux.ui.layout_list_overlay import build_layout_list_overlay
-        from rich.console import Console
-        import io
 
         panel = build_layout_list_overlay(
             ws.theme,
             cursor=getattr(ctx, "layout_list_cursor", 0),
             current_panes=len(ws._window().panes),
-            terminal_width=80,
-            terminal_height=24,
+            terminal_width=tw,
+            terminal_height=th,
+            tab=getattr(ctx, "layout_list_tab", 0),
+            custom_cursor=getattr(ctx, "layout_custom_cursor", 0),
+            builder=getattr(ctx, "layout_builder", None),
+            custom_layouts=list(ws.cfg.custom_layouts),
         )
-        s = io.StringIO()
-        Console(file=s, force_terminal=True, width=80).print(panel)
-        return {"type": "overlay", "kind": "layout_list", "content": s.getvalue()}
+        return {"type": "overlay", "kind": "layout_list", "content": _render_rich_panel(panel, tw, th)}
     elif mode == "copy":
         return None
     elif mode == "statusbar_style":
         from plmux.ui.status_bar_style_overlay import build_status_bar_style_overlay
-        from rich.console import Console
-        import io
 
         style_cfg = ws.cfg.ui.status_bar_style
         panel = build_status_bar_style_overlay(
             style_cfg,
             ws.theme,
             cursor=getattr(ctx, "statusbar_style_cursor", 0),
-            terminal_width=80,
-            terminal_height=24,
+            terminal_width=tw,
+            terminal_height=th,
         )
-        s = io.StringIO()
-        Console(file=s, force_terminal=True, width=80).print(panel)
-        return {"type": "overlay", "kind": "statusbar_style", "content": s.getvalue()}
+        return {"type": "overlay", "kind": "statusbar_style", "content": _render_rich_panel(panel, tw, th)}
     elif mode == "pane_border_style":
         from plmux.ui.pane_border_style_overlay import build_pane_border_style_overlay
-        from rich.console import Console
-        import io
 
         style_cfg = ws.cfg.ui.pane_border_style
         panel = build_pane_border_style_overlay(
             style_cfg,
             ws.theme,
             cursor=getattr(ctx, "pane_border_style_cursor", 0),
-            terminal_width=80,
-            terminal_height=24,
+            terminal_width=tw,
+            terminal_height=th,
         )
-        s = io.StringIO()
-        Console(file=s, force_terminal=True, width=80).print(panel)
-        return {"type": "overlay", "kind": "pane_border_style", "content": s.getvalue()}
+        return {"type": "overlay", "kind": "pane_border_style", "content": _render_rich_panel(panel, tw, th)}
+    elif mode == "web_token":
+        from plmux.ui.web_token_overlay import build_web_token_overlay
+
+        wt_tokens = _web_server.token_manager.list_tokens() if _web_server else []
+        panel = build_web_token_overlay(
+            ws.theme,
+            tokens=wt_tokens,
+            last_generated=getattr(ctx, "web_token_last_generated", None),
+            last_generated_mode=getattr(ctx, "web_token_last_mode", None),
+            cursor=getattr(ctx, "web_token_cursor", 0),
+            server_running=_web_server is not None,
+            terminal_width=tw,
+            terminal_height=th,
+        )
+        return {"type": "overlay", "kind": "web_token", "content": _render_rich_panel(panel, tw, th)}
     return None
 
 
@@ -358,9 +360,24 @@ async def start_web_server(
     *,
     host: str = "0.0.0.0",
     port: int = 9888,
+    tls_cert: Optional[str] = None,
+    tls_key: Optional[str] = None,
+    auth_enabled: bool = False,
+    config_tokens: Optional[list[str]] = None,
+    config_readonly_tokens: Optional[list[str]] = None,
 ) -> WebClientServer:
     global _web_server, _broadcast_task, _output_hook_installed
-    _web_server = WebClientServer(workspace, host=host, port=port, on_input=_on_web_input)
+    _web_server = WebClientServer(
+        workspace,
+        host=host,
+        port=port,
+        on_input=_on_web_input,
+        tls_cert=tls_cert,
+        tls_key=tls_key,
+        auth_enabled=auth_enabled,
+        config_tokens=config_tokens,
+        config_readonly_tokens=config_readonly_tokens,
+    )
     await _web_server.start()
 
     if not _output_hook_installed:
@@ -510,10 +527,26 @@ def _overlay_state_sig(ctx: Any) -> str:
         parts.append(str(ctx.plugin_list_cursor))
     elif mode == "layout_list":
         parts.append(str(ctx.layout_list_cursor))
+        parts.append(str(ctx.layout_list_tab))
+        parts.append(str(ctx.layout_custom_cursor))
+        builder = getattr(ctx, "layout_builder", {})
+        if builder:
+            parts.append(str(builder.get("field_cursor", 0)))
+            parts.append(str(builder.get("editing", False)))
+            parts.append(str(builder.get("edit_buffer", "")))
+            parts.append(str(builder.get("name", "")))
+            parts.append(str(builder.get("panes", 2)))
+            parts.append(str(builder.get("direction", "row")))
+            parts.append(str(builder.get("ratio", 0.5)))
+            parts.append(str(builder.get("message", "")))
     elif mode == "statusbar_style":
         parts.append(str(ctx.statusbar_style_cursor))
     elif mode == "pane_border_style":
         parts.append(str(ctx.pane_border_style_cursor))
+    elif mode == "web_token":
+        parts.append(str(ctx.web_token_cursor))
+        parts.append(str(ctx.web_token_last_generated or ""))
+        parts.append(str(ctx.web_token_last_mode or ""))
     elif mode == "cmdline":
         parts.append(ctx.cmd_buffer)
     return "|".join(parts)

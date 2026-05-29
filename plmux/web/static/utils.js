@@ -9,9 +9,33 @@ export function isHttps() {
   return document.location.protocol === "https:";
 }
 
+export function getAuthToken() {
+  var params = new URLSearchParams(window.location.search);
+  return params.get("token") || null;
+}
+
+export function getAuthMode() {
+  if (window.__PLMUX_AUTH_MODE) return window.__PLMUX_AUTH_MODE;
+  return "rw";
+}
+
+export function getSessionName() {
+  if (window.__PLMUX_SESSION) return window.__PLMUX_SESSION;
+  var path = window.location.pathname;
+  if (path.startsWith("/session/")) {
+    return decodeURIComponent(path.substring("/session/".length));
+  }
+  return null;
+}
+
 export function getWebSocketUrl() {
   var proto = isHttps() ? "wss:" : "ws:";
-  return proto + "//" + location.host + "/ws";
+  var url = proto + "//" + location.host + "/ws";
+  var token = getAuthToken();
+  if (token) {
+    url += "?token=" + encodeURIComponent(token);
+  }
+  return url;
 }
 
 export function hexToRgba(hex, alpha) {

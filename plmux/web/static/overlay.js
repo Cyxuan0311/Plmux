@@ -17,6 +17,12 @@ export function initOverlay(state) {
       }
     });
   }
+
+  window.addEventListener("resize", function() {
+    if (_state && _state.overlayVisible && _term) {
+      _sizeOverlayPanel();
+    }
+  });
 }
 
 function _sizeOverlayPanel() {
@@ -26,11 +32,9 @@ function _sizeOverlayPanel() {
 
   var vw = window.innerWidth;
   var vh = window.innerHeight;
-  var panelWidth = Math.min(vw * 0.85, 1200);
-  var panelHeight = Math.min(vh * 0.85, 800);
 
-  overlayPanel.style.width = panelWidth + "px";
-  overlayPanel.style.height = panelHeight + "px";
+  overlayPanel.style.width = Math.min(Math.floor(vw * 0.85), 1100) + "px";
+  overlayPanel.style.height = Math.min(Math.floor(vh * 0.85), 600) + "px";
 
   try { _fit.fit(); } catch(e) {}
 
@@ -40,10 +44,16 @@ function _sizeOverlayPanel() {
   var charHeight = dims.css.cell.height;
   if (!charWidth || !charHeight) return;
 
-  var targetCols = Math.min(80, Math.floor((panelWidth - 16) / charWidth));
-  var targetRows = Math.min(24, Math.floor((panelHeight - 16) / charHeight));
-  var actualWidth = Math.ceil(charWidth * targetCols) + 16;
-  var actualHeight = Math.ceil(charHeight * targetRows) + 16;
+  var targetCols = Math.min(80, Math.floor((vw * 0.85 - 24) / charWidth));
+  var targetRows = Math.min(26, Math.floor((vh * 0.85 - 24) / charHeight));
+  targetCols = Math.max(targetCols, 40);
+  targetRows = Math.max(targetRows, 12);
+
+  var actualWidth = Math.ceil(charWidth * targetCols) + 24;
+  var actualHeight = Math.ceil(charHeight * targetRows) + 24;
+
+  actualWidth = Math.min(actualWidth, Math.floor(vw * 0.92));
+  actualHeight = Math.min(actualHeight, Math.floor(vh * 0.92));
 
   overlayPanel.style.width = actualWidth + "px";
   overlayPanel.style.height = actualHeight + "px";
@@ -77,9 +87,11 @@ export function show(kind, content) {
   requestAnimationFrame(function() {
     _sizeOverlayPanel();
 
-    _term.reset();
-    _term.write(content);
-    _term.focus();
+    requestAnimationFrame(function() {
+      _term.reset();
+      _term.write(content);
+      _term.focus();
+    });
   });
 }
 
