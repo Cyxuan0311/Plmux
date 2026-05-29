@@ -103,6 +103,11 @@ def handle_cmdline_mode(key, ctx: AppContext) -> None:
         if res.show_layout_list:
             ctx.mode = "layout_list"
             ctx.layout_list_cursor = 0
+        if res.show_web_token:
+            ctx.mode = "web_token"
+            ctx.web_token_cursor = 0
+            ctx.web_token_last_generated = None
+            ctx.web_token_last_mode = None
         if res.start_web_server:
             ctx._pending_web_port = res.web_port
         if res.stop_web_server:

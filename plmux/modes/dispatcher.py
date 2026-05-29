@@ -15,6 +15,7 @@ from plmux.modes.plugin_list_mode import handle_plugin_list_mode
 from plmux.modes.layout_list_mode import handle_layout_list_mode
 from plmux.modes.statusbar_style_mode import handle_statusbar_style_mode
 from plmux.modes.pane_border_style_mode import handle_pane_border_style_mode
+from plmux.modes.web_token_mode import handle_web_token_mode
 from plmux.utils.event_bus import get_event_bus
 
 
@@ -30,6 +31,7 @@ _MODE_HANDLERS = {
     "layout_list": handle_layout_list_mode,
     "statusbar_style": handle_statusbar_style_mode,
     "pane_border_style": handle_pane_border_style_mode,
+    "web_token": handle_web_token_mode,
     "esc_wait": handle_normal_mode,
 }
 

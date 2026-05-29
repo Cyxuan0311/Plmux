@@ -26,6 +26,12 @@ class AppContext:
     session_list_tab: int = 0
     plugin_list_cursor: int = 0
     layout_list_cursor: int = 0
+    layout_list_tab: int = 0
+    layout_custom_cursor: int = 0
+    layout_builder: dict = field(default_factory=dict)
+    web_token_cursor: int = 0
+    web_token_last_generated: str | None = None
+    web_token_last_mode: str | None = None
     _pending_web_port: int = 0
     _pending_web_stop: bool = False
     running: bool = True

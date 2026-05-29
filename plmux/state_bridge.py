@@ -20,6 +20,7 @@ from plmux.daemon import (
 )
 from plmux.session.models import tree_from_json, tree_to_json
 from plmux.terminal.session import TerminalSession
+from plmux.ui.geometry import pane_indices
 from plmux.ui.theme import Theme
 from plmux.workspace import TmuxServer, Session, Window
 
@@ -226,8 +227,12 @@ def _build_session_from_state(
         win_idx = 0
         if len(sess.windows) == 1:
             win_idx = 0
-        elif local_idx < len(sess.windows):
-            win_idx = local_idx
+        else:
+            for wi, w in enumerate(sess.windows):
+                indices = pane_indices(w.tree)
+                if local_idx in indices:
+                    win_idx = wi
+                    break
         sess.windows[win_idx].panes.append(session)
 
         encoded = buffer_dumps.get(str(global_idx))
