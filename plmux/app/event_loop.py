@@ -526,7 +526,17 @@ async def async_main(
             ctx._pending_web_port = 0
             try:
                 from plmux.web.server import start_web_server
-                await start_web_server(ctx.ws, port=port)
+                web_cfg = ctx.ws.cfg.web
+                await start_web_server(
+                    ctx.ws,
+                    host=web_cfg.host,
+                    port=port,
+                    tls_cert=web_cfg.tls_cert,
+                    tls_key=web_cfg.tls_key,
+                    auth_enabled=web_cfg.auth_enabled,
+                    config_tokens=web_cfg.tokens,
+                    config_readonly_tokens=web_cfg.readonly_tokens,
+                )
                 ctx.dirty = True
             except Exception:
                 pass
@@ -818,6 +828,10 @@ async def async_main(
                             plugin_enabled_names=list(cfg.extensions.enabled),
                             layout_list_active=(ctx.mode == "layout_list"),
                             layout_list_cursor=ctx.layout_list_cursor,
+                            layout_list_tab=ctx.layout_list_tab,
+                            layout_custom_cursor=ctx.layout_custom_cursor,
+                            layout_builder=ctx.layout_builder,
+                            custom_layouts=list(ctx.ws.cfg.custom_layouts),
                             current_panes=len(ctx.ws._window().panes),
                             clock_str=ctx.clock_str,
                             mode=ctx.mode.upper() if ctx.mode != "normal" else "NORMAL",
@@ -839,6 +853,10 @@ async def async_main(
                             statusbar_style_cursor=ctx.statusbar_style_cursor,
                             pane_border_style_active=(ctx.mode == "pane_border_style"),
                             pane_border_style_cursor=ctx.pane_border_style_cursor,
+                            web_token_active=(ctx.mode == "web_token"),
+                            web_token_cursor=ctx.web_token_cursor,
+                            web_token_last_generated=ctx.web_token_last_generated,
+                            web_token_last_mode=ctx.web_token_last_mode,
                         )
                         live.update(root)
                         ctx.dirty = False

@@ -28,6 +28,7 @@ class CommandResult:
     show_pane_border_style: bool = False
     show_plugin_list: bool = False
     show_layout_list: bool = False
+    show_web_token: bool = False
     start_web_server: bool = False
     web_port: int = 9888
     stop_web_server: bool = False
@@ -136,6 +137,10 @@ def _cmd_web(ws: TmuxServer, args: List[str]) -> CommandResult:
 
 def _cmd_webstop(ws: TmuxServer, args: List[str]) -> CommandResult:
     return CommandResult(stop_web_server=True)
+
+
+def _cmd_web_token(ws: TmuxServer, args: List[str]) -> CommandResult:
+    return CommandResult(show_web_token=True)
 
 
 def _cmd_reload(ws: TmuxServer, args: List[str]) -> CommandResult:
@@ -638,6 +643,8 @@ _COMMANDS: Dict[str, Callable] = {
     "layout": _cmd_layout,
     "web": _cmd_web,
     "webstop": _cmd_webstop,
+    "web-token": _cmd_web_token,
+    "webtoken": _cmd_web_token,
     "reload": _cmd_reload,
     "source": _cmd_reload,
     "sync": _cmd_sync,

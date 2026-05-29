@@ -117,6 +117,26 @@ class ExtensionsConfig:
 
 
 @dataclass
+class WebConfig:
+    host: str = "0.0.0.0"
+    port: int = 9888
+    tls_cert: Optional[str] = None
+    tls_key: Optional[str] = None
+    auth_enabled: bool = False
+    tokens: List[str] = field(default_factory=list)
+    readonly_tokens: List[str] = field(default_factory=list)
+
+
+@dataclass
+class CustomLayoutConfig:
+    name: str = ""
+    panes: int = 2
+    direction: str = "row"
+    ratio: float = 0.5
+    children: List[CustomLayoutConfig] = field(default_factory=list)
+
+
+@dataclass
 class HooksConfig:
     hooks: Dict[str, List[str]] = field(default_factory=dict)
 
@@ -131,4 +151,6 @@ class PlmuxConfig:
     theme: str = "default"
     extensions: ExtensionsConfig = field(default_factory=ExtensionsConfig)
     hooks: HooksConfig = field(default_factory=HooksConfig)
+    web: WebConfig = field(default_factory=WebConfig)
+    custom_layouts: List[CustomLayoutConfig] = field(default_factory=list)
     extra: Dict[str, Any] = field(default_factory=dict)

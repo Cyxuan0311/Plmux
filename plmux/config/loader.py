@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from plmux.config.schema import (
+    CustomLayoutConfig,
     ExtensionsConfig,
     HooksConfig,
     KeysConfig,
@@ -18,6 +19,7 @@ from plmux.config.schema import (
     SessionConfig,
     StatusBarStyle,
     UIConfig,
+    WebConfig,
 )
 
 
@@ -130,6 +132,41 @@ def _parse_hooks(d: Dict[str, Any]) -> HooksConfig:
     return HooksConfig(hooks=parsed)
 
 
+def _parse_web(d: Dict[str, Any]) -> WebConfig:
+    return WebConfig(
+        host=str(d.get("host", "0.0.0.0")),
+        port=int(d.get("port", 9888)),
+        tls_cert=d.get("tls_cert"),
+        tls_key=d.get("tls_key"),
+        auth_enabled=bool(d.get("auth_enabled", False)),
+        tokens=[str(t) for t in d.get("tokens", [])],
+        readonly_tokens=[str(t) for t in d.get("readonly_tokens", [])],
+    )
+
+
+def _parse_custom_layout(d: Dict[str, Any]) -> CustomLayoutConfig:
+    children = d.get("children", [])
+    return CustomLayoutConfig(
+        name=str(d.get("name", "")),
+        panes=int(d.get("panes", 2)),
+        direction=str(d.get("direction", "row")),
+        ratio=float(d.get("ratio", 0.5)),
+        children=[_parse_custom_layout(c) for c in children if isinstance(c, dict)],
+    )
+
+
+def _custom_layout_to_dict(cl: CustomLayoutConfig) -> Dict[str, Any]:
+    d: Dict[str, Any] = {
+        "name": cl.name,
+        "panes": cl.panes,
+        "direction": cl.direction,
+        "ratio": cl.ratio,
+    }
+    if cl.children:
+        d["children"] = [_custom_layout_to_dict(c) for c in cl.children]
+    return d
+
+
 def dict_to_config(data: Dict[str, Any]) -> PlmuxConfig:
     known = {
         "shell",
@@ -140,8 +177,14 @@ def dict_to_config(data: Dict[str, Any]) -> PlmuxConfig:
         "theme",
         "extensions",
         "hooks",
+        "web",
+        "custom_layouts",
     }
     extra = {k: v for k, v in data.items() if k not in known}
+
+    raw_custom = data.get("custom_layouts", [])
+    custom_layouts = [_parse_custom_layout(c) for c in raw_custom if isinstance(c, dict)]
+
     return PlmuxConfig(
         shell=data.get("shell"),
         env=dict(data.get("env") or {}),
@@ -151,6 +194,8 @@ def dict_to_config(data: Dict[str, Any]) -> PlmuxConfig:
         theme=str(data.get("theme", "default")),
         extensions=_parse_extensions(dict(data.get("extensions") or {})),
         hooks=_parse_hooks(dict(data.get("hooks") or {})),
+        web=_parse_web(dict(data.get("web") or {})),
+        custom_layouts=custom_layouts,
         extra=extra,
     )
 
@@ -218,6 +263,16 @@ def save_user_config(cfg: PlmuxConfig, explicit_path: str | None = None) -> None
             "search_paths": cfg.extensions.search_paths,
             "plugin_settings": cfg.extensions.plugin_settings,
         },
+        "web": {
+            "host": cfg.web.host,
+            "port": cfg.web.port,
+            "tls_cert": cfg.web.tls_cert,
+            "tls_key": cfg.web.tls_key,
+            "auth_enabled": cfg.web.auth_enabled,
+            "tokens": cfg.web.tokens,
+            "readonly_tokens": cfg.web.readonly_tokens,
+        },
+        "custom_layouts": [_custom_layout_to_dict(c) for c in cfg.custom_layouts],
     }
     data.update(cfg.extra)
 
