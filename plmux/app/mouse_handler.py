@@ -114,19 +114,33 @@ def handle_mouse_event(
         if mx < 0 or my < 0:
             return True
 
-        focused_s = ws._window().panes[ws.focus_pane] if ws._window().panes else None
-        child_mouse = focused_s.screen.mouse_mode if focused_s else 0
-        if child_mouse and focused_s is not None:
-            raw = str(key)
-            if raw:
-                focused_s.write_text(raw)
-            return True
+        win = ws._window()
+
+        def _pane_at(x: int, y: int) -> int | None:
+            for idx, r in rects.items():
+                if r.row <= y < (r.row + r.rows) and r.col <= x < (r.col + r.cols):
+                    return idx
+            return None
 
         is_scroll = key_name in ("MOUSE_SCROLL_UP", "MOUSE_SCROLL_DOWN")
         is_scroll_up = key_name == "MOUSE_SCROLL_UP"
         is_release = "RELEASED" in key_name
         is_motion = "MOTION" in key_name
         is_press = not is_release and not is_motion and not is_scroll
+
+        clicked_idx = _pane_at(mx, my)
+        if clicked_idx is not None and clicked_idx != ws.focus_pane:
+            if is_press:
+                ws.focus_pane = clicked_idx
+                ctx.dirty = True
+
+        focused_s = win.panes[ws.focus_pane] if win.panes else None
+        child_mouse = focused_s.screen.mouse_mode if focused_s else 0
+        if child_mouse and focused_s is not None:
+            raw = str(key)
+            if raw:
+                focused_s.write_text(raw)
+            return True
 
         if ctx.mouse_resize_active:
             if is_release:
