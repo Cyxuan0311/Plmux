@@ -12,3 +12,4 @@ plmux.egg-info/
 .mypy_cache/
 .ruf_cache/
 Use_PLMUX.md
+.opencode/

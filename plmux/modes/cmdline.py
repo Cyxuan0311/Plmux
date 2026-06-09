@@ -8,43 +8,45 @@ from plmux.input.commands import get_completions, run_command_line
 from plmux.modes import AppContext
 
 
-def _common_prefix(strings: list[str]) -> str:
-    if not strings:
-        return ""
-    prefix = strings[0]
-    for s in strings[1:]:
-        i = 0
-        while i < min(len(prefix), len(s)) and prefix[i] == s[i]:
-            i += 1
-        prefix = prefix[:i]
-    return prefix
+def _apply_tab_completion(
+    cmd_buffer: str,
+    completion_list: list[str] | None = None,
+    completion_index: int = -1,
+) -> tuple[str, str, list[str], int]:
+    if completion_list is None:
+        completion_list = []
 
+    if completion_list:
+        new_index = (completion_index + 1) % len(completion_list)
+        parts = cmd_buffer.strip().split()
+        if len(parts) <= 1:
+            new_buffer = completion_list[new_index] + " "
+        else:
+            prefix = " ".join(parts[:-1])
+            new_buffer = prefix + " " + completion_list[new_index] + " "
+        hints = "  ".join(completion_list)
+        return new_buffer, hints, completion_list, new_index
 
-def _apply_tab_completion(cmd_buffer: str) -> tuple[str, str]:
     completions = get_completions(cmd_buffer)
     if not completions:
-        return cmd_buffer, ""
+        return cmd_buffer, "", [], -1
 
     if len(completions) == 1:
         parts = cmd_buffer.strip().split()
         if len(parts) <= 1:
-            return completions[0] + " ", ""
+            return completions[0] + " ", "", [], -1
         else:
             prefix = " ".join(parts[:-1])
-            return prefix + " " + completions[0] + " ", ""
+            return prefix + " " + completions[0] + " ", "", [], -1
 
-    common = _common_prefix(completions)
     parts = cmd_buffer.strip().split()
-    current_word = parts[-1] if parts else ""
-
-    if common and len(common) > len(current_word):
-        if len(parts) <= 1:
-            return common + " ", "  ".join(completions)
-        else:
-            prefix = " ".join(parts[:-1])
-            return prefix + " " + common + " ", "  ".join(completions)
-
-    return cmd_buffer, "  ".join(completions)
+    if len(parts) <= 1:
+        new_buffer = completions[0] + " "
+    else:
+        prefix = " ".join(parts[:-1])
+        new_buffer = prefix + " " + completions[0] + " "
+    hints = "  ".join(completions)
+    return new_buffer, hints, completions, 0
 
 
 def handle_cmdline_mode(key, ctx: AppContext) -> None:
@@ -54,13 +56,19 @@ def handle_cmdline_mode(key, ctx: AppContext) -> None:
         ctx.cmd_history_pos = -1
         ctx.cmd_history_draft = ""
         ctx.completion_hints = ""
+        ctx.completion_list = []
+        ctx.completion_index = -1
         ctx.dirty = True
     elif not key.is_sequence and str(key) == "\x04":
         pass
     elif key.name == "KEY_TAB":
-        new_buffer, hints = _apply_tab_completion(ctx.cmd_buffer)
+        new_buffer, hints, new_list, new_index = _apply_tab_completion(
+            ctx.cmd_buffer, ctx.completion_list, ctx.completion_index,
+        )
         ctx.cmd_buffer = new_buffer
         ctx.completion_hints = hints
+        ctx.completion_list = new_list
+        ctx.completion_index = new_index
         ctx.dirty = True
     elif key in ("\n", "\r") or key.name == "KEY_ENTER":
         cmd_text = ctx.cmd_buffer.strip()
@@ -74,6 +82,8 @@ def handle_cmdline_mode(key, ctx: AppContext) -> None:
         res = run_command_line(ctx.ws, ctx.cmd_buffer)
         ctx.cmd_buffer = ""
         ctx.completion_hints = ""
+        ctx.completion_list = []
+        ctx.completion_index = -1
         ctx.mode = "normal"
         if res.quit:
             if res.hard_quit:
@@ -199,6 +209,8 @@ def handle_cmdline_mode(key, ctx: AppContext) -> None:
                 ctx.cmd_history_pos -= 1
             ctx.cmd_buffer = ctx.cmd_history[ctx.cmd_history_pos]
             ctx.completion_hints = ""
+            ctx.completion_list = []
+            ctx.completion_index = -1
             ctx.dirty = True
     elif key.name == "KEY_DOWN":
         if ctx.cmd_history_pos >= 0:
@@ -209,15 +221,21 @@ def handle_cmdline_mode(key, ctx: AppContext) -> None:
                 ctx.cmd_history_pos = -1
                 ctx.cmd_buffer = ctx.cmd_history_draft
             ctx.completion_hints = ""
+            ctx.completion_list = []
+            ctx.completion_index = -1
             ctx.dirty = True
     elif key.name in ("KEY_BACKSPACE", "KEY_DELETE"):
         ctx.cmd_buffer = ctx.cmd_buffer[:-1]
         ctx.completion_hints = ""
+        ctx.completion_list = []
+        ctx.completion_index = -1
         ctx.dirty = True
     else:
         if not key.is_sequence:
             ctx.cmd_buffer += str(key)
             ctx.completion_hints = ""
+            ctx.completion_list = []
+            ctx.completion_index = -1
             ctx.dirty = True
 
 

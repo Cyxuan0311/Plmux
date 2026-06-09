@@ -74,6 +74,8 @@ class AppContext:
     sigint_flagged: bool = False
     hard_quit_requested: bool = False
     completion_hints: str = ""
+    completion_list: list[str] = field(default_factory=list)
+    completion_index: int = -1
     config_reload_pending: bool = False
     theme_search_query: str = ""
 

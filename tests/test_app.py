@@ -44,6 +44,20 @@ def test_apply_tab_completion_single(monkeypatch):
 
     monkeypatch.setattr(cmdline_mod, "get_completions", fake_get_completions)
 
-    assert app._apply_tab_completion("") == ("", "attach  ls")
-    assert app._apply_tab_completion("a") == ("attach ", "")
-    assert app._apply_tab_completion("attach ") == ("attach ", "")
+    buf, hints, clist, cidx = app._apply_tab_completion("")
+    assert buf == "attach "
+    assert hints == "attach  ls"
+    assert clist == ["attach", "ls"]
+    assert cidx == 0
+
+    buf, hints, clist, cidx = app._apply_tab_completion("a")
+    assert buf == "attach "
+    assert hints == ""
+    assert clist == []
+    assert cidx == -1
+
+    buf, hints, clist, cidx = app._apply_tab_completion("attach ")
+    assert buf == "attach "
+    assert hints == ""
+    assert clist == []
+    assert cidx == -1
