@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from plmux.modes import AppContext
 
-_NUM_TABS = 3
+_NUM_TABS = 4
 
 
 def handle_help_mode(key, ctx: AppContext) -> None:

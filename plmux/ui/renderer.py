@@ -437,6 +437,7 @@ def build_cmdline(
     buffer_text: str,
     terminal_width: int,
     completion_hints: str = "",
+    autosuggest_suggestion: str = "",
 ) -> Text:
     bg = theme.cmdline_background
     text = Text()
@@ -446,6 +447,11 @@ def build_cmdline(
         if buffer_text:
             text.append(buffer_text, style=theme.cmdline_body)
         text.append("▌", style=f"bold {theme.cmdline_indicator_fg} on {bg}")
+        if autosuggest_suggestion:
+            remaining = terminal_width - len(text.plain)
+            if len(autosuggest_suggestion) > remaining:
+                autosuggest_suggestion = autosuggest_suggestion[:remaining]
+            text.append(autosuggest_suggestion, style=f"dim #83a598 on {bg}")
         if completion_hints:
             text.append("  ", style=f"on {bg}")
             hint_text = completion_hints
@@ -504,6 +510,7 @@ def build_root(
     clock_str: str = "",
     mode: str = "NORMAL",
     completion_hints: str = "",
+    autosuggest_suggestion: str = "",
     plugin_overlay_name: str = "",
     plugin_state: dict | None = None,
     clock_mode_pane: int | None = None,
@@ -560,6 +567,7 @@ def build_root(
         buffer_text=cmd_buffer,
         terminal_width=terminal_width,
         completion_hints=completion_hints,
+        autosuggest_suggestion=autosuggest_suggestion,
     )
 
     root = Layout(name="root")

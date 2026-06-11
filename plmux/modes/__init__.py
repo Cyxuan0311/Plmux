@@ -79,6 +79,7 @@ class AppContext:
     completion_hints: str = ""
     completion_list: list[str] = field(default_factory=list)
     completion_index: int = -1
+    autosuggest_suggestion: str = ""
     config_reload_pending: bool = False
     theme_search_query: str = ""
 

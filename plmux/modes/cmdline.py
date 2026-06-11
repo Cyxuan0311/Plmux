@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from plmux.app.utils import parse_cmdline_trigger, parse_prefix_key
 from plmux.config.loader import load_config, save_user_config
 from plmux.extensions.registry import load_plugins, set_plugin_settings
 from plmux.input.commands import get_completions, run_command_line
@@ -49,6 +50,21 @@ def _apply_tab_completion(
     return new_buffer, hints, completions, 0
 
 
+def _compute_autosuggest(cmd_buffer: str, cmd_history: list[str]) -> str:
+    if not cmd_buffer:
+        return ""
+    for entry in reversed(cmd_history):
+        if entry.startswith(cmd_buffer) and entry != cmd_buffer:
+            return entry[len(cmd_buffer):]
+    from plmux.input.commands import get_completions
+    completions = get_completions(cmd_buffer)
+    if completions:
+        suggestion = completions[0]
+        if suggestion.startswith(cmd_buffer) and suggestion != cmd_buffer:
+            return suggestion[len(cmd_buffer):]
+    return ""
+
+
 def handle_cmdline_mode(key, ctx: AppContext) -> None:
     if key.name == "KEY_ESCAPE":
         ctx.mode = "normal"
@@ -58,6 +74,7 @@ def handle_cmdline_mode(key, ctx: AppContext) -> None:
         ctx.completion_hints = ""
         ctx.completion_list = []
         ctx.completion_index = -1
+        ctx.autosuggest_suggestion = ""
         ctx.dirty = True
     elif not key.is_sequence and str(key) == "\x04":
         pass
@@ -69,7 +86,16 @@ def handle_cmdline_mode(key, ctx: AppContext) -> None:
         ctx.completion_hints = hints
         ctx.completion_list = new_list
         ctx.completion_index = new_index
+        ctx.autosuggest_suggestion = ""
         ctx.dirty = True
+    elif key.name == "KEY_RIGHT":
+        if ctx.autosuggest_suggestion:
+            ctx.cmd_buffer += ctx.autosuggest_suggestion
+            ctx.autosuggest_suggestion = ""
+            ctx.completion_hints = ""
+            ctx.completion_list = []
+            ctx.completion_index = -1
+            ctx.dirty = True
     elif key in ("\n", "\r") or key.name == "KEY_ENTER":
         cmd_text = ctx.cmd_buffer.strip()
         if cmd_text:
@@ -84,6 +110,7 @@ def handle_cmdline_mode(key, ctx: AppContext) -> None:
         ctx.completion_hints = ""
         ctx.completion_list = []
         ctx.completion_index = -1
+        ctx.autosuggest_suggestion = ""
         ctx.mode = "normal"
         if res.quit:
             if res.hard_quit:
@@ -217,6 +244,7 @@ def handle_cmdline_mode(key, ctx: AppContext) -> None:
             ctx.completion_hints = ""
             ctx.completion_list = []
             ctx.completion_index = -1
+            ctx.autosuggest_suggestion = ""
             ctx.dirty = True
     elif key.name == "KEY_DOWN":
         if ctx.cmd_history_pos >= 0:
@@ -229,12 +257,14 @@ def handle_cmdline_mode(key, ctx: AppContext) -> None:
             ctx.completion_hints = ""
             ctx.completion_list = []
             ctx.completion_index = -1
+            ctx.autosuggest_suggestion = ""
             ctx.dirty = True
     elif key.name in ("KEY_BACKSPACE", "KEY_DELETE"):
         ctx.cmd_buffer = ctx.cmd_buffer[:-1]
         ctx.completion_hints = ""
         ctx.completion_list = []
         ctx.completion_index = -1
+        ctx.autosuggest_suggestion = _compute_autosuggest(ctx.cmd_buffer, ctx.cmd_history)
         ctx.dirty = True
     else:
         if not key.is_sequence:
@@ -242,6 +272,7 @@ def handle_cmdline_mode(key, ctx: AppContext) -> None:
             ctx.completion_hints = ""
             ctx.completion_list = []
             ctx.completion_index = -1
+            ctx.autosuggest_suggestion = _compute_autosuggest(ctx.cmd_buffer, ctx.cmd_history)
             ctx.dirty = True
 
 
@@ -266,18 +297,3 @@ def _do_reload_config(ctx: AppContext) -> None:
         pass
 
 
-def _parse_prefix_key(spec: str) -> str:
-    s = (spec or "ctrl+b").lower().strip()
-    if s in ("ctrl+b", "c-b", "^b"):
-        return chr(2)
-    if s in ("ctrl+a", "c-a", "^a"):
-        return chr(1)
-    return chr(2)
-
-
-def _parse_cmdline_trigger(spec: str) -> tuple[str, str]:
-    s = (spec or ":").strip()
-    low = s.lower()
-    if low in ("ctrl+shift+:", "c-s-:", "ctrl+shift+;", "c-s-;"):
-        return ("chord", "ctrl+shift+;")
-    return ("char", s[:1])

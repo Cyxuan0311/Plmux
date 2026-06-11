@@ -9,6 +9,8 @@ from rich.text import Text
 
 from plmux.ui.theme import Theme
 
+import plmux
+
 _FIXED_HEIGHT = 20
 _VISIBLE_ROWS = _FIXED_HEIGHT - 6
 
@@ -25,8 +27,9 @@ def build_help_overlay(
     shortcuts_tab = _build_shortcuts_table(theme, bindings=bindings)
     commands_tab = _build_commands_table(theme)
     copy_tab = _build_copy_mode_table(theme)
+    about_tab = _build_about_section(theme)
 
-    tabs = [" Shortcuts ", " Commands ", " Copy Mode "]
+    tabs = [" Shortcuts ", " Commands ", " Copy Mode ", " About "]
     tab_headers = Text()
     for i, label in enumerate(tabs):
         if i == active_tab:
@@ -40,8 +43,10 @@ def build_help_overlay(
         content, raw_rows = shortcuts_tab
     elif active_tab == 1:
         content, raw_rows = commands_tab
-    else:
+    elif active_tab == 2:
         content, raw_rows = copy_tab
+    else:
+        content, raw_rows = about_tab
 
     total_rows = len(raw_rows)
     max_scroll = max(0, total_rows - _VISIBLE_ROWS)
@@ -230,4 +235,31 @@ def _build_copy_mode_table(theme: Theme) -> tuple[Table, list[tuple]]:
     ]
     for key, action in rows:
         t.add_row(key, action)
+    return t, rows
+
+
+def _build_about_section(theme: Theme) -> tuple[Table, list[tuple]]:
+    import platform, sys, os
+    from plmux.input.commands import _COMMANDS
+    from plmux.ui.theme import list_themes
+
+    t = Table(show_header=False, box=box.SIMPLE, border_style="dim #665c54", padding=(0, 1))
+    t.add_column("Key", style="bold #83a598", width=16)
+    t.add_column("Value", style="#ebdbb2")
+
+    n_cmds = len(_COMMANDS)
+    n_themes = len(list_themes())
+    rows = [
+        ("plmux", "cross-platform lightweight terminal multiplexer"),
+        ("Version", plmux.__version__),
+        ("Python", f"{platform.python_implementation()} {platform.python_version()}"),
+        ("Platform", f"{sys.platform} ({os.uname().release})"),
+        ("Themes", str(n_themes)),
+        ("Commands", str(n_cmds)),
+        ("License", "MIT"),
+        ("Author", "Frames"),
+        ("GitHub", "https://github.com/Cxyuan0311/plmux.git"),
+    ]
+    for key, val in rows:
+        t.add_row(key, val)
     return t, rows
