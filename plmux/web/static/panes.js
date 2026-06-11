@@ -104,24 +104,72 @@ function _findBorderAt(termArea, clientX, clientY) {
   return null;
 }
 
+var _resizeOverlay = null;
+
+function _createResizeOverlay(termArea) {
+  var el = document.createElement("div");
+  el.id = "resize-overlay";
+  el.style.cssText = "position:absolute;z-index:20;pointer-events:none;display:none;transition:none;";
+  termArea.appendChild(el);
+  return el;
+}
+
+function _showResizeOverlay(dir, pos, areaRect) {
+  if (!_resizeOverlay) return;
+  var el = _resizeOverlay;
+  el.style.display = "block";
+  if (dir === "row") {
+    el.style.left = (pos - 1) + "px";
+    el.style.width = "3px";
+    el.style.top = "0";
+    el.style.height = "100%";
+    el.style.backgroundColor = "var(--border-active)";
+  } else {
+    el.style.top = (pos - 1) + "px";
+    el.style.height = "3px";
+    el.style.left = "0";
+    el.style.width = "100%";
+    el.style.backgroundColor = "var(--border-active)";
+  }
+}
+
+function _hideResizeOverlay() {
+  if (_resizeOverlay) {
+    _resizeOverlay.style.display = "none";
+  }
+}
+
 function _installMouseHandlers(termArea, state, paneManager) {
+  _resizeOverlay = _createResizeOverlay(termArea);
+
+  // Capture phase: intercept mousedown near borders before xterm.js
   termArea.addEventListener("mousedown", function(e) {
     if (e.button !== 0) return;
 
     var borderInfo = _findBorderAt(termArea, e.clientX, e.clientY);
     if (borderInfo) {
       e.preventDefault();
+      e.stopPropagation();
+      var areaRect = termArea.getBoundingClientRect();
       _dragState = {
         dir: borderInfo.dir,
         idxA: borderInfo.idxA,
         idxB: borderInfo.idxB,
         startX: e.clientX,
         startY: e.clientY,
-        areaRect: termArea.getBoundingClientRect(),
+        areaRect: areaRect,
+        pos: borderInfo.pos,
       };
       document.body.style.cursor = borderInfo.dir === "row" ? "col-resize" : "row-resize";
+      termArea.style.cursor = borderInfo.dir === "row" ? "col-resize" : "row-resize";
+      _showResizeOverlay(borderInfo.dir, borderInfo.pos, areaRect);
       return;
     }
+  }, true);
+
+  // Bubble phase: focus handling for normal clicks
+  termArea.addEventListener("mousedown", function(e) {
+    if (e.button !== 0) return;
 
     var container = e.target.closest(".pane-container");
     if (!container) return;
@@ -135,6 +183,7 @@ function _installMouseHandlers(termArea, state, paneManager) {
     }
   });
 
+  // Capture phase: update cursor on hover near borders
   termArea.addEventListener("mousemove", function(e) {
     if (_dragState) {
       e.preventDefault();
@@ -146,7 +195,7 @@ function _installMouseHandlers(termArea, state, paneManager) {
     } else {
       termArea.style.cursor = "";
     }
-  });
+  }, true);
 
   termArea.addEventListener("mouseleave", function() {
     if (!_dragState) {
@@ -157,6 +206,15 @@ function _installMouseHandlers(termArea, state, paneManager) {
   document.addEventListener("mousemove", function(e) {
     if (!_dragState) return;
     e.preventDefault();
+    var areaW = _dragState.areaRect.width;
+    var areaH = _dragState.areaRect.height;
+    if (_dragState.dir === "row" && areaW > 0) {
+      var dx = e.clientX - _dragState.startX;
+      _showResizeOverlay(_dragState.dir, _dragState.pos + dx, _dragState.areaRect);
+    } else if (_dragState.dir === "col" && areaH > 0) {
+      var dy = e.clientY - _dragState.startY;
+      _showResizeOverlay(_dragState.dir, _dragState.pos + dy, _dragState.areaRect);
+    }
   });
 
   document.addEventListener("mouseup", function(e) {
@@ -190,6 +248,7 @@ function _installMouseHandlers(termArea, state, paneManager) {
       }
     }
 
+    _hideResizeOverlay();
     _dragState = null;
     document.body.style.cursor = "";
     termArea.style.cursor = "";
@@ -311,11 +370,30 @@ export function createPaneManager(state) {
         for (var idx in this.fits) {
           try { this.fits[idx].fit(); } catch(e) {}
         }
-        var focusedTerm = this.terms[state.currentFocus];
-        if (focusedTerm && (focusedTerm.cols !== state.lastCols || focusedTerm.rows !== state.lastRows)) {
-          state.lastCols = focusedTerm.cols;
-          state.lastRows = focusedTerm.rows;
-          state.send({ type: "resize", cols: state.lastCols, rows: state.lastRows });
+        var totalCols = 80, totalRows = 24;
+        if (this.termArea) {
+          var r = this.termArea.getBoundingClientRect();
+          if (r.width > 0 && r.height > 0) {
+            var cellW = 9.5, cellH = 19;
+            for (var k in this.terms) {
+              var t = this.terms[k];
+              if (t) {
+                var d = t._core._renderService.dimensions;
+                if (d && d.css && d.css.cell && d.css.cell.width && d.css.cell.height) {
+                  cellW = d.css.cell.width;
+                  cellH = d.css.cell.height;
+                  break;
+                }
+              }
+            }
+            totalCols = Math.max(40, Math.floor(r.width / cellW));
+            totalRows = Math.max(12, Math.floor(r.height / cellH));
+          }
+        }
+        if (totalCols !== state.lastCols || totalRows !== state.lastRows) {
+          state.lastCols = totalCols;
+          state.lastRows = totalRows;
+          state.send({ type: "resize", cols: totalCols, rows: totalRows });
         }
       } catch(e) {}
     }

@@ -76,6 +76,7 @@ export function applyTheme(t, state, paneManager, overlayManager) {
   }
   r.setProperty("--term-bg", termBg);
   state.termBg = termBg;
+  state.overlayBg = (t.status && t.status.background) || termBg;
   document.body.style.background = termBg;
 
   var xtheme = buildXtermTheme(t, termBg);

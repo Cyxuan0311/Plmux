@@ -33,6 +33,7 @@ class CommandResult:
     start_web_server: bool = False
     web_port: int = 9888
     stop_web_server: bool = False
+    restart_web_server: bool = False
     reload_config: bool = False
     plugin_overlay: Optional[str] = None
     toggle_broadcast: Optional[bool] = None
@@ -142,6 +143,10 @@ def _cmd_web(ws: TmuxServer, args: List[str]) -> CommandResult:
 
 def _cmd_webstop(ws: TmuxServer, args: List[str]) -> CommandResult:
     return CommandResult(stop_web_server=True)
+
+
+def _cmd_web_restart(ws: TmuxServer, args: List[str]) -> CommandResult:
+    return CommandResult(restart_web_server=True)
 
 
 def _cmd_web_token(ws: TmuxServer, args: List[str]) -> CommandResult:
@@ -650,6 +655,8 @@ _COMMANDS: Dict[str, Callable] = {
     "layout": _cmd_layout,
     "web": _cmd_web,
     "webstop": _cmd_webstop,
+    "web-restart": _cmd_web_restart,
+    "webrestart": _cmd_web_restart,
     "web-token": _cmd_web_token,
     "webtoken": _cmd_web_token,
     "reload": _cmd_reload,

@@ -125,6 +125,9 @@ def handle_cmdline_mode(key, ctx: AppContext) -> None:
             ctx._pending_web_port = res.web_port
         if res.stop_web_server:
             ctx._pending_web_stop = True
+        if res.restart_web_server:
+            ctx._pending_web_stop = True
+            ctx._pending_web_restart = True
         if res.reload_config:
             _do_reload_config(ctx)
         if res.toggle_broadcast is not None:

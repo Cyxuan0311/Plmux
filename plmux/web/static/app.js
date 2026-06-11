@@ -19,6 +19,7 @@ var state = {
   overlayVisible: false,
   overlayKind: "",
   termBg: "#1d2021",
+  overlayBg: "#1d2021",
   terms: {},
   send: send,
   sendRaw: sendRaw,
@@ -55,24 +56,46 @@ document.addEventListener("DOMContentLoaded", function() {
     paneManager.fitAll();
   };
 
-  var resizeObserver = new ResizeObserver(function() {
-    scheduleFit(paneManager);
-    reposition(state, paneManager);
-  });
+  function _onResize() {
+    if (state.layoutTree) {
+      scheduleFit(paneManager);
+      reposition(state, paneManager);
+    } else {
+      var c = document.getElementById("pane-0");
+      if (c && paneManager.termArea) {
+        var r = paneManager.termArea.getBoundingClientRect();
+        if (r.width > 0 && r.height > 0) {
+          c.style.left = "0";
+          c.style.top = "0";
+          c.style.width = r.width + "px";
+          c.style.height = r.height + "px";
+          if (paneManager.fits[0]) {
+            try { paneManager.fits[0].fit(); } catch(e) {}
+          }
+        }
+      }
+    }
+  }
+
+  var resizeObserver = new ResizeObserver(_onResize);
   resizeObserver.observe(paneManager.termArea);
 
-  window.addEventListener("resize", function() {
-    scheduleFit(paneManager);
-    reposition(state, paneManager);
-  });
+  window.addEventListener("resize", _onResize);
 
   paneManager.ensure(0);
 
-  document.fonts.ready.then(function() {
-    if (state.connected) {
-      paneManager.fitAll();
+  var initContainer = document.getElementById("pane-0");
+  if (initContainer && paneManager.termArea) {
+    var areaRect = paneManager.termArea.getBoundingClientRect();
+    if (areaRect.width > 0 && areaRect.height > 0) {
+      initContainer.style.left = "0";
+      initContainer.style.top = "0";
+      initContainer.style.width = areaRect.width + "px";
+      initContainer.style.height = areaRect.height + "px";
+      var ft = paneManager.fits[0];
+      if (ft) { try { ft.fit(); } catch(e) {} }
     }
-  });
+  }
 
   connect();
 });

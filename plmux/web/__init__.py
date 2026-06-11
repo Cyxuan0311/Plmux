@@ -595,6 +595,9 @@ class WebClientServer:
             pass
         finally:
             self._clients.discard(ws)
+            if not self._clients and self.ws_ref:
+                self.ws_ref._web_term_rows = None
+                self.ws_ref._web_term_cols = None
             try:
                 await ws.close()
             except Exception:
@@ -627,46 +630,54 @@ class WebClientServer:
             rows = msg.get("rows", 24)
             ws._plmux_cols = cols
             ws._plmux_rows = rows
-            if self.ws_ref and hasattr(self.ws_ref, "sessions"):
-                for session in self.ws_ref.sessions:
+            if self.ws_ref:
+                self.ws_ref._web_term_cols = cols
+                self.ws_ref._web_term_rows = rows
+                self.ws_ref._overlay_cols = msg.get("overlay_cols", 80)
+                self.ws_ref._overlay_rows = msg.get("overlay_rows", 26)
+                if hasattr(self.ws_ref, "sessions"):
+                    for session in self.ws_ref.sessions:
+                        try:
+                            session.resize(rows, cols)
+                        except Exception:
+                            pass
+                    for i, s in enumerate(self.ws_ref.sessions):
+                        try:
+                            content = s.build_render_text(draw_cursor=(i == self.ws_ref.focus_pane))
+                            snapshot_lines = []
+                            for line_ansi in content._lines:
+                                snapshot_lines.append(line_ansi)
+                            snapshot_data = "\r\n".join(snapshot_lines)
+                            cursor_y = s.screen.cursor.y
+                            cursor_x = s.screen.cursor.x
+                            reposition = f"\x1b[{cursor_y + 1};{cursor_x + 1}H"
+                            await self.broadcast("pane_snapshot", {
+                                "idx": i,
+                                "data": snapshot_data + reposition,
+                                "cursor": [cursor_y, cursor_x],
+                            })
+                        except Exception:
+                            pass
                     try:
-                        session.resize(rows, cols)
+                        from plmux.web.server import _build_layout_msg
+                        layout_msg = _build_layout_msg(self.ws_ref)
+                        await self.broadcast("layout", layout_msg)
                     except Exception:
                         pass
-                for i, s in enumerate(self.ws_ref.sessions):
-                    try:
-                        content = s.build_render_text(draw_cursor=(i == self.ws_ref.focus_pane))
-                        snapshot_lines = []
-                        for line_ansi in content._lines:
-                            snapshot_lines.append(line_ansi)
-                        snapshot_data = "\r\n".join(snapshot_lines)
-                        cursor_y = s.screen.cursor.y
-                        cursor_x = s.screen.cursor.x
-                        reposition = f"\x1b[{cursor_y + 1};{cursor_x + 1}H"
-                        await self.broadcast("pane_snapshot", {
-                            "idx": i,
-                            "data": snapshot_data + reposition,
-                            "cursor": [cursor_y, cursor_x],
-                        })
-                    except Exception:
-                        pass
-                try:
-                    from plmux.web.server import _build_layout_msg
-                    layout_msg = _build_layout_msg(self.ws_ref)
-                    await self.broadcast("layout", layout_msg)
-                except Exception:
-                    pass
         elif msg_type == "resize":
             cols = msg.get("cols", 80)
             rows = msg.get("rows", 24)
             ws._plmux_cols = cols
             ws._plmux_rows = rows
-            if self.ws_ref and hasattr(self.ws_ref, "sessions"):
-                for session in self.ws_ref.sessions:
-                    try:
-                        session.resize(rows, cols)
-                    except Exception:
-                        pass
+            if self.ws_ref:
+                self.ws_ref._web_term_cols = cols
+                self.ws_ref._web_term_rows = rows
+                if hasattr(self.ws_ref, "sessions"):
+                    for session in self.ws_ref.sessions:
+                        try:
+                            session.resize(rows, cols)
+                        except Exception:
+                            pass
         elif msg_type == "focus":
             if is_readonly:
                 return
@@ -691,6 +702,12 @@ class WebClientServer:
                     srv._last_layout_sig = ""
                 except Exception:
                     pass
+        elif msg_type == "overlay_resize":
+            cols = msg.get("cols", 80)
+            rows = msg.get("rows", 26)
+            if self.ws_ref:
+                self.ws_ref._overlay_cols = cols
+                self.ws_ref._overlay_rows = rows
 
 
 def _web_key_to_terminal(msg: dict) -> str:

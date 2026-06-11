@@ -526,27 +526,30 @@ async def async_main(
 
     web_task: asyncio.Task | None = None
 
+    async def _start_web(port: int) -> None:
+        try:
+            from plmux.web.server import start_web_server
+            web_cfg = ctx.ws.cfg.web
+            await start_web_server(
+                ctx.ws,
+                host=web_cfg.host,
+                port=port,
+                tls_cert=web_cfg.tls_cert,
+                tls_key=web_cfg.tls_key,
+                auth_enabled=web_cfg.auth_enabled,
+                config_tokens=web_cfg.tokens,
+                config_readonly_tokens=web_cfg.readonly_tokens,
+            )
+            ctx.dirty = True
+        except Exception:
+            pass
+
     async def _maybe_start_web() -> None:
         nonlocal web_task
         if ctx._pending_web_port > 0:
             port = ctx._pending_web_port
             ctx._pending_web_port = 0
-            try:
-                from plmux.web.server import start_web_server
-                web_cfg = ctx.ws.cfg.web
-                await start_web_server(
-                    ctx.ws,
-                    host=web_cfg.host,
-                    port=port,
-                    tls_cert=web_cfg.tls_cert,
-                    tls_key=web_cfg.tls_key,
-                    auth_enabled=web_cfg.auth_enabled,
-                    config_tokens=web_cfg.tokens,
-                    config_readonly_tokens=web_cfg.readonly_tokens,
-                )
-                ctx.dirty = True
-            except Exception:
-                pass
+            await _start_web(port)
         if ctx._pending_web_stop:
             ctx._pending_web_stop = False
             try:
@@ -555,6 +558,10 @@ async def async_main(
                 ctx.dirty = True
             except Exception:
                 pass
+        if ctx._pending_web_restart:
+            ctx._pending_web_restart = False
+            web_cfg = ctx.ws.cfg.web
+            await _start_web(web_cfg.port)
 
     def persist() -> None:
         from plmux.session.models import tree_to_json
@@ -732,6 +739,8 @@ async def async_main(
 
                     ctx.ws.web_mode = ctx.mode
                     ctx.ws.web_cmd_buffer = ctx.cmd_buffer
+                    ctx.ws.clock_mode_pane = ctx.clock_mode_pane
+                    ctx.ws.clock_str = ctx.clock_str
 
                     await _maybe_start_web()
 

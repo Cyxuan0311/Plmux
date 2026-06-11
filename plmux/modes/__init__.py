@@ -34,6 +34,7 @@ class AppContext:
     web_token_last_mode: str | None = None
     _pending_web_port: int = 0
     _pending_web_stop: bool = False
+    _pending_web_restart: bool = False
     running: bool = True
     dirty: bool = True
     detach_requested: bool = False

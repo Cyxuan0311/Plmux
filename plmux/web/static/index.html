@@ -69,7 +69,8 @@
 }
 * { margin:0; padding:0; box-sizing:border-box; }
 html, body { width:100%; height:100%; overflow:hidden; background:var(--term-bg); color:var(--term-fg); }
-body { display:flex; flex-direction:column; font-family:'JetBrainsMono NFM', 'Symbols Nerd Font', monospace; -webkit-font-smoothing:antialiased; }
+body { font-family:'JetBrainsMono NFM', 'Symbols Nerd Font', monospace; -webkit-font-smoothing:antialiased; }
+#app { display:flex; flex-direction:column; width:100%; height:100%; }
 
 #status-bar {
   display:flex;
@@ -82,8 +83,7 @@ body { display:flex; flex-direction:column; font-family:'JetBrainsMono NFM', 'Sy
   background:var(--pane-bg);
   z-index:10;
   overflow:hidden;
-  border-top:1px solid rgba(255,255,255,0.06);
-  font-family:'Symbols Nerd Font', 'JetBrainsMono NFM', monospace;
+  font-family:'JetBrainsMono NFM', 'Symbols Nerd Font', monospace;
 }
 #status-bar .left, #status-bar .right { display:flex; align-items:center; }
 
@@ -103,7 +103,8 @@ body { display:flex; flex-direction:column; font-family:'JetBrainsMono NFM', 'Sy
   display:inline-flex;
   align-items:center;
   height:100%;
-  font-size:calc(var(--sb-height) * 0.82);
+  font-size:var(--sb-font);
+  font-weight:700;
   line-height:1;
   flex-shrink:0;
 }
@@ -162,8 +163,8 @@ body { display:flex; flex-direction:column; font-family:'JetBrainsMono NFM', 'Sy
 .pane-container .pane-border.box-double { border:3px double var(--border-inactive); }
 .pane-container .pane-border.box-dotted { border:1px dotted var(--border-inactive); }
 
-.pane-container.focused .pane-border.box-square { border-color:var(--border-active); }
-.pane-container.focused .pane-border.box-rounded { border-color:var(--border-active); }
+.pane-container.focused .pane-border.box-square { border-color:var(--border-active); box-shadow:0 0 4px rgba(133,199,81,0.15); }
+.pane-container.focused .pane-border.box-rounded { border-color:var(--border-active); box-shadow:0 0 4px rgba(133,199,81,0.15); }
 .pane-container.focused .pane-border.box-heavy { border-color:var(--border-active); box-shadow:0 0 8px rgba(133,199,81,0.3); }
 .pane-container.focused .pane-border.box-minimal { border-bottom-color:var(--border-active); border-bottom-width:2px; }
 .pane-container.focused .pane-border.box-ascii { border-color:var(--border-active); }
@@ -203,6 +204,7 @@ body { display:flex; flex-direction:column; font-family:'JetBrainsMono NFM', 'Sy
 }
 .pane-container.focused .pane-marker.indicator-marker { display:block; }
 
+#resize-overlay { transition:none; }
 .pane-container .xterm { height:100%; width:100%; }
 .pane-container .xterm-screen { height:100% !important; }
 
@@ -221,10 +223,8 @@ body { display:flex; flex-direction:column; font-family:'JetBrainsMono NFM', 'Sy
   display:flex;
   justify-content:center;
   align-items:center;
-  background:rgba(0,0,0,0.65);
-  backdrop-filter:blur(3px);
-  -webkit-backdrop-filter:blur(3px);
-  animation: overlayFadeIn 0.15s ease;
+  background:rgba(0,0,0,0.75);
+  animation: overlayFadeIn 0.12s ease;
 }
 #overlay-container.hidden { display:none; }
 
@@ -245,9 +245,10 @@ body { display:flex; flex-direction:column; font-family:'JetBrainsMono NFM', 'Sy
   max-height:92vh;
 }
 
-#overlay-panel .xterm { padding:8px; height:100%; }
+#overlay-panel .xterm { height:100%; }
 #overlay-panel .xterm-viewport { overflow-y:auto !important; }
 #overlay-panel .xterm-screen { height:100% !important; }
+#overlay-panel .xterm-screen canvas { display:block; }
 
 #cmdline-bar {
   height:var(--cl-height);
@@ -259,8 +260,7 @@ body { display:flex; flex-direction:column; font-family:'JetBrainsMono NFM', 'Sy
   padding:0 10px;
   gap:6px;
   z-index:10;
-  border-top:1px solid rgba(255,255,255,0.06);
-  font-family:'Symbols Nerd Font', 'JetBrainsMono NFM', monospace;
+  font-family:'JetBrainsMono NFM', 'Symbols Nerd Font', monospace;
 }
 #cmdline-bar .indicator {
   font-weight:700;
@@ -281,28 +281,115 @@ body { display:flex; flex-direction:column; font-family:'JetBrainsMono NFM', 'Sy
 #connect-overlay {
   position:fixed;
   top:0; left:0; right:0; bottom:0;
-  background:rgba(0,0,0,0.92);
+  z-index:100;
   display:flex;
-  flex-direction:column;
   justify-content:center;
   align-items:center;
-  z-index:100;
-  gap:14px;
-  backdrop-filter:blur(6px);
-  -webkit-backdrop-filter:blur(6px);
+  background:radial-gradient(ellipse at 50% 40%, rgba(30,35,30,0.95) 0%, rgba(10,12,10,0.98) 100%);
+  opacity:1;
+  visibility:visible;
+  transition:opacity 0.3s ease, visibility 0.3s ease;
 }
-#connect-overlay.hidden { display:none; }
-#connect-overlay h2 { color:var(--mode-normal-bg); font-size:24px; font-weight:700; letter-spacing:1.5px; }
-#connect-overlay p { color:var(--pane-fg); font-size:13px; opacity:0.7; }
-#connect-overlay .status { color:var(--win-bg); font-size:12px; }
-#connect-overlay .spinner {
-  width:28px; height:28px;
-  border:2.5px solid rgba(255,255,255,0.12);
-  border-top-color:var(--mode-normal-bg);
+#connect-overlay.hidden {
+  opacity:0;
+  visibility:hidden;
+  pointer-events:none;
+}
+.connect-card {
+  background:rgba(22,25,22,0.92);
+  border:1px solid rgba(255,255,255,0.06);
+  border-radius:10px;
+  box-shadow:0 12px 48px rgba(0,0,0,0.6), 0 0 0 1px rgba(133,199,81,0.06);
+  min-width:380px;
+  overflow:hidden;
+  backdrop-filter:blur(8px);
+}
+.connect-card-header {
+  display:flex;
+  align-items:center;
+  padding:10px 14px;
+  background:rgba(255,255,255,0.03);
+  border-bottom:1px solid rgba(255,255,255,0.05);
+  gap:7px;
+  user-select:none;
+}
+.connect-dot {
+  width:10px; height:10px;
   border-radius:50%;
-  animation:spin 0.8s linear infinite;
+  flex-shrink:0;
 }
-@keyframes spin { to { transform:rotate(360deg); } }
+.connect-dot.red { background:#ff5f56; }
+.connect-dot.yellow { background:#ffbd2e; }
+.connect-dot.green { background:#27c93f; }
+.connect-card-label {
+  margin-left:auto;
+  font-size:11px;
+  color:rgba(255,255,255,0.2);
+  text-transform:uppercase;
+  letter-spacing:1.2px;
+  font-weight:600;
+}
+.connect-card-body {
+  padding:36px 32px 32px;
+  text-align:center;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+}
+.connect-logo {
+  font-size:13px;
+  line-height:1.55;
+  color:rgba(255,255,255,0.25);
+  white-space:pre;
+  text-align:center;
+  font-weight:400;
+  letter-spacing:0;
+}
+.connect-logo .hl { color:var(--mode-normal-bg); }
+.connect-title {
+  color:rgba(255,255,255,0.9);
+  font-size:22px;
+  font-weight:700;
+  letter-spacing:0.8px;
+  margin-top:16px;
+}
+.connect-subtitle {
+  color:rgba(255,255,255,0.4);
+  font-size:12px;
+  letter-spacing:1.5px;
+  text-transform:uppercase;
+  margin-top:6px;
+  font-weight:500;
+}
+.connect-status-row {
+  margin-top:24px;
+  display:flex;
+  align-items:center;
+  gap:10px;
+  padding:8px 16px;
+  background:rgba(255,255,255,0.03);
+  border-radius:6px;
+  border:1px solid rgba(255,255,255,0.04);
+}
+.connect-pulse {
+  width:8px; height:8px;
+  border-radius:50%;
+  background:var(--mode-normal-bg);
+  animation:connectPulse 1.4s ease-in-out infinite;
+  flex-shrink:0;
+}
+@keyframes connectPulse {
+  0%, 100% { opacity:0.3; transform:scale(0.85); box-shadow:0 0 0 0 rgba(133,199,81,0); }
+  50% { opacity:1; transform:scale(1.15); box-shadow:0 0 6px 1px rgba(133,199,81,0.3); }
+}
+#connect-overlay .status {
+  font-size:12px;
+  color:rgba(255,255,255,0.5);
+  letter-spacing:0.3px;
+  transition:color 0.25s ease;
+}
+#connect-overlay .status.error { color:var(--bat-low-bg); }
+#connect-overlay .status.ok { color:var(--mode-normal-bg); }
 
 @media (max-width:600px) {
   :root { --sb-font:11px; --sb-height:22px; --cl-height:20px; }
@@ -313,29 +400,48 @@ body { display:flex; flex-direction:column; font-family:'JetBrainsMono NFM', 'Sy
 </head>
 <body>
 
-<div id="terminal-area">
-  <div id="overlay-container" class="hidden">
-    <div id="overlay-panel"></div>
+<div id="app">
+  <div id="terminal-area">
+    <div id="overlay-container" class="hidden">
+      <div id="overlay-panel"></div>
+    </div>
+  </div>
+
+  <div id="status-bar">
+    <div class="left" id="sb-left"></div>
+    <div class="right" id="sb-right"></div>
+  </div>
+
+  <div id="cmdline-bar">
+    <span class="indicator ready" id="cl-indicator">READY</span>
+    <span class="hint" id="cl-hint">^B +: cmd &#x2502; ^B prefix</span>
+    <span class="buffer" id="cl-buffer" style="display:none"></span>
+    <span class="cursor-ch" id="cl-cursor" style="display:none">&#x258C;</span>
   </div>
 </div>
 
-<div id="cmdline-bar">
-  <span class="indicator ready" id="cl-indicator">READY</span>
-  <span class="hint" id="cl-hint">^B +: cmd &middot; ^B prefix</span>
-  <span class="buffer" id="cl-buffer" style="display:none"></span>
-  <span class="cursor-ch" id="cl-cursor" style="display:none">&#x258C;</span>
-</div>
-
-<div id="status-bar">
-  <div class="left" id="sb-left"></div>
-  <div class="right" id="sb-right"></div>
-</div>
-
 <div id="connect-overlay">
-  <div class="spinner"></div>
-  <h2>plmux web</h2>
-  <p>Browser-based terminal session</p>
-  <span class="status" id="conn-status">Connecting...</span>
+  <div class="connect-card">
+    <div class="connect-card-header">
+      <span class="connect-dot red"></span>
+      <span class="connect-dot yellow"></span>
+      <span class="connect-dot green"></span>
+      <span class="connect-card-label">plmux</span>
+    </div>
+    <div class="connect-card-body">
+      <div class="connect-logo">
+<span class="hl">╭──────────────────────╮</span>
+│  <span class="hl">plmux</span>  web  client  │
+<span class="hl">╰──────────────────────╯</span>
+      </div>
+      <div class="connect-title">terminal multiplexer</div>
+      <div class="connect-subtitle">browser-based session</div>
+      <div class="connect-status-row">
+        <span class="connect-pulse"></span>
+        <span class="status" id="conn-status">Connecting...</span>
+      </div>
+    </div>
+  </div>
 </div>
 
 <script type="module" src="/static/app.js"></script>

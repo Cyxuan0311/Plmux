@@ -43,6 +43,12 @@ class TmuxServer:
         self.current_session: int = 0
         self.web_mode: str = "normal"
         self.web_cmd_buffer: str = ""
+        self.clock_mode_pane: int | None = None
+        self.clock_str: str = ""
+        self._web_term_rows: int | None = None
+        self._web_term_cols: int | None = None
+        self._overlay_cols: int = 80
+        self._overlay_rows: int = 26
         self.buffers: BufferManager = BufferManager()
 
         if restore and restore.sessions_data:
@@ -204,7 +210,9 @@ class TmuxServer:
         self._session().rotate_panes(direction)
 
     def sync_geometry(self, content_rows: int, content_cols: int) -> None:
-        self._session().sync_geometry(content_rows, content_cols)
+        rows = self._web_term_rows if self._web_term_rows is not None else content_rows
+        cols = self._web_term_cols if self._web_term_cols is not None else content_cols
+        self._session().sync_geometry(rows, cols)
 
     def active_session(self) -> TerminalSession:
         return self._session().active_session()

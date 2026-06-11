@@ -68,6 +68,7 @@ def _theme_to_colors(theme: Any) -> dict[str, Any]:
             "host_bg": status_host["bg"],
             "cmd_fg": status_cmd["fg"],
             "cmd_bg": status_cmd["bg"],
+            "background": theme.status_background,
         },
         "pane": {
             "active_border": theme.pane_active_border,
@@ -229,16 +230,35 @@ def _build_layout_msg(ws: Any) -> dict[str, Any]:
 
 def _render_rich_panel(panel: Any, tw: int, th: int) -> str:
     from rich.console import Console
+    from rich.style import Style
     import io
 
+    bg = None
+    if panel.style:
+        try:
+            bgcolor = panel.style.bgcolor
+            if bgcolor is not None:
+                bg = Style(bgcolor=bgcolor)
+        except Exception:
+            pass
+
     s = io.StringIO()
-    Console(file=s, force_terminal=True, width=tw, height=th, legacy_windows=False).print(panel)
-    return s.getvalue().replace("\n", "\r\n")
+    Console(file=s, force_terminal=True, width=tw, height=th, legacy_windows=False, style=bg).print(panel)
+    result = s.getvalue().replace("\n", "\r\n")
+    if result.endswith("\r\n"):
+        result = result[:-2]
+    return result
 
 
 def _build_overlay_msg(ws: Any, ctx: Any) -> dict[str, Any] | None:
     mode = getattr(ws, "web_mode", "normal")
-    tw, th = 78, 24
+    cols = getattr(ws, "_overlay_cols", 80)
+    rows = getattr(ws, "_overlay_rows", 26)
+    bcols = cols + 4
+    brows = rows + 4
+
+    def rp(panel):
+        return _render_rich_panel(panel, cols, rows)
 
     if mode == "help":
         from plmux.ui.help_overlay import build_help_overlay
@@ -246,21 +266,21 @@ def _build_overlay_msg(ws: Any, ctx: Any) -> dict[str, Any] | None:
         panel = build_help_overlay(
             ws.theme,
             active_tab=getattr(ctx, "help_tab", 0),
-            terminal_width=tw,
-            terminal_height=th,
+            terminal_width=bcols,
+            terminal_height=brows,
         )
-        return {"type": "overlay", "kind": "help", "content": _render_rich_panel(panel, tw, th)}
+        return {"type": "overlay", "kind": "help", "content": rp(panel)}
     elif mode == "theme_list":
         from plmux.ui.theme_list_overlay import build_theme_list_overlay
 
         panel = build_theme_list_overlay(
             ws.theme,
             cursor=getattr(ctx, "theme_list_cursor", 0),
-            terminal_width=tw,
-            terminal_height=th,
+            terminal_width=bcols,
+            terminal_height=brows,
             search_query=getattr(ctx, "theme_search_query", ""),
         )
-        return {"type": "overlay", "kind": "theme_list", "content": _render_rich_panel(panel, tw, th)}
+        return {"type": "overlay", "kind": "theme_list", "content": rp(panel)}
     elif mode == "session_list":
         from plmux.ui.session_list_overlay import build_session_list_overlay
 
@@ -268,10 +288,11 @@ def _build_overlay_msg(ws: Any, ctx: Any) -> dict[str, Any] | None:
             ws,
             ws.theme,
             cursor=getattr(ctx, "session_list_cursor", 0),
-            terminal_width=tw,
-            terminal_height=th,
+            active_tab=getattr(ctx, "session_list_tab", 0),
+            terminal_width=bcols,
+            terminal_height=brows,
         )
-        return {"type": "overlay", "kind": "session_list", "content": _render_rich_panel(panel, tw, th)}
+        return {"type": "overlay", "kind": "session_list", "content": rp(panel)}
     elif mode == "plugin_list":
         from plmux.ui.plugin_list_overlay import build_plugin_list_overlay
 
@@ -280,10 +301,10 @@ def _build_overlay_msg(ws: Any, ctx: Any) -> dict[str, Any] | None:
             search_paths=[],
             enabled_names=[],
             cursor=getattr(ctx, "plugin_list_cursor", 0),
-            terminal_width=tw,
-            terminal_height=th,
+            terminal_width=bcols,
+            terminal_height=brows,
         )
-        return {"type": "overlay", "kind": "plugin_list", "content": _render_rich_panel(panel, tw, th)}
+        return {"type": "overlay", "kind": "plugin_list", "content": rp(panel)}
     elif mode == "layout_list":
         from plmux.ui.layout_list_overlay import build_layout_list_overlay
 
@@ -291,14 +312,14 @@ def _build_overlay_msg(ws: Any, ctx: Any) -> dict[str, Any] | None:
             ws.theme,
             cursor=getattr(ctx, "layout_list_cursor", 0),
             current_panes=len(ws._window().panes),
-            terminal_width=tw,
-            terminal_height=th,
+            terminal_width=bcols,
+            terminal_height=brows,
             tab=getattr(ctx, "layout_list_tab", 0),
             custom_cursor=getattr(ctx, "layout_custom_cursor", 0),
             builder=getattr(ctx, "layout_builder", None),
             custom_layouts=list(ws.cfg.custom_layouts),
         )
-        return {"type": "overlay", "kind": "layout_list", "content": _render_rich_panel(panel, tw, th)}
+        return {"type": "overlay", "kind": "layout_list", "content": rp(panel)}
     elif mode == "copy":
         return None
     elif mode == "statusbar_style":
@@ -309,10 +330,10 @@ def _build_overlay_msg(ws: Any, ctx: Any) -> dict[str, Any] | None:
             style_cfg,
             ws.theme,
             cursor=getattr(ctx, "statusbar_style_cursor", 0),
-            terminal_width=tw,
-            terminal_height=th,
+            terminal_width=bcols,
+            terminal_height=brows,
         )
-        return {"type": "overlay", "kind": "statusbar_style", "content": _render_rich_panel(panel, tw, th)}
+        return {"type": "overlay", "kind": "statusbar_style", "content": rp(panel)}
     elif mode == "pane_border_style":
         from plmux.ui.pane_border_style_overlay import build_pane_border_style_overlay
 
@@ -321,10 +342,10 @@ def _build_overlay_msg(ws: Any, ctx: Any) -> dict[str, Any] | None:
             style_cfg,
             ws.theme,
             cursor=getattr(ctx, "pane_border_style_cursor", 0),
-            terminal_width=tw,
-            terminal_height=th,
+            terminal_width=bcols,
+            terminal_height=brows,
         )
-        return {"type": "overlay", "kind": "pane_border_style", "content": _render_rich_panel(panel, tw, th)}
+        return {"type": "overlay", "kind": "pane_border_style", "content": rp(panel)}
     elif mode == "web_token":
         from plmux.ui.web_token_overlay import build_web_token_overlay
 
@@ -336,10 +357,25 @@ def _build_overlay_msg(ws: Any, ctx: Any) -> dict[str, Any] | None:
             last_generated_mode=getattr(ctx, "web_token_last_mode", None),
             cursor=getattr(ctx, "web_token_cursor", 0),
             server_running=_web_server is not None,
-            terminal_width=tw,
-            terminal_height=th,
+            terminal_width=bcols,
+            terminal_height=brows,
         )
-        return {"type": "overlay", "kind": "web_token", "content": _render_rich_panel(panel, tw, th)}
+        return {"type": "overlay", "kind": "web_token", "content": rp(panel)}
+
+    from plmux.extensions.registry import get_plugin_overlay
+    plugin_overlay_fn = get_plugin_overlay(mode)
+    if plugin_overlay_fn is not None:
+        try:
+            panel = plugin_overlay_fn(
+                ws.theme,
+                terminal_width=bcols,
+                terminal_height=brows,
+                plugin_state=getattr(ctx, "plugin_state", {}),
+            )
+            return {"type": "overlay", "kind": mode, "content": rp(panel)}
+        except Exception:
+            return None
+
     return None
 
 
@@ -424,6 +460,7 @@ async def stop_web_server() -> None:
 async def _broadcast_loop(server: WebClientServer, ws: Any) -> None:
     global _last_theme_name, _last_layout_sig, _last_mode, _last_overlay_kind
     _hooked_sessions: set[int] = set()
+    _prev_clock_mode: int | None = None
     while True:
         try:
             if server._clients and ws._window().panes:
@@ -431,11 +468,36 @@ async def _broadcast_loop(server: WebClientServer, ws: Any) -> None:
                 from datetime import datetime
                 win = ws._window()
                 all_sessions = ws.all_panes()
+                current_clock_mode = getattr(ws, "clock_mode_pane", None)
 
                 for i, s in enumerate(all_sessions):
-                    if id(s) not in _hooked_sessions:
+                    is_new = id(s) not in _hooked_sessions
+                    if is_new:
                         _hooked_sessions.add(id(s))
                         _attach_pane_hook(i, s)
+
+                    clock_active = current_clock_mode == i
+                    clock_just_exited = (_prev_clock_mode == i) and (current_clock_mode != i)
+
+                    if clock_active:
+                        try:
+                            from plmux.ui.clock_overlay import build_clock_overlay
+                            clock_panel = build_clock_overlay(
+                                ws.theme,
+                                pane_rows=s.rows,
+                                pane_cols=s.cols,
+                                clock_str=getattr(ws, "clock_str", ""),
+                            )
+                            clock_panel.height = s.rows
+                            clock_content = _render_rich_panel(clock_panel, s.cols, s.rows)
+                            await server.broadcast("pane_snapshot", {
+                                "idx": i,
+                                "data": clock_content,
+                                "cursor": [0, 0],
+                            })
+                        except Exception:
+                            pass
+                    elif is_new or clock_just_exited:
                         try:
                             content = s.build_render_text(draw_cursor=(i == ws.focus_pane))
                             snapshot_data = "\r\n".join(content._lines)
@@ -446,6 +508,8 @@ async def _broadcast_loop(server: WebClientServer, ws: Any) -> None:
                             })
                         except Exception:
                             pass
+
+                _prev_clock_mode = current_clock_mode
 
                 dead_ids = set()
                 alive_ids = set()
@@ -523,6 +587,7 @@ def _overlay_state_sig(ctx: Any) -> str:
         parts.append(str(ctx.theme_list_cursor))
     elif mode == "session_list":
         parts.append(str(ctx.session_list_cursor))
+        parts.append(str(ctx.session_list_tab))
     elif mode == "plugin_list":
         parts.append(str(ctx.plugin_list_cursor))
     elif mode == "layout_list":
@@ -549,19 +614,32 @@ def _overlay_state_sig(ctx: Any) -> str:
         parts.append(str(ctx.web_token_last_mode or ""))
     elif mode == "cmdline":
         parts.append(ctx.cmd_buffer)
+    else:
+        from plmux.extensions.registry import get_plugin_overlay
+        if get_plugin_overlay(mode) is not None:
+            ps = getattr(ctx, "plugin_state", {})
+            if ps:
+                parts.append(str(ps))
     return "|".join(parts)
 
 
+_last_overlay_cols: int = 80
+_last_overlay_rows: int = 26
+
+
 def notify_web_state_change(ctx: Any) -> None:
-    global _last_mode, _last_overlay_kind, _last_layout_sig, _last_overlay_sig
+    global _last_mode, _last_overlay_kind, _last_layout_sig, _last_overlay_sig, _last_overlay_cols, _last_overlay_rows
     if _web_server is None or not _web_server._clients:
         return
 
     ws = ctx.ws
     current_mode = ctx.mode.upper() if ctx.mode != "normal" else "NORMAL"
     overlay_sig = _overlay_state_sig(ctx)
+    oc = getattr(ws, "_overlay_cols", 80)
+    or_ = getattr(ws, "_overlay_rows", 26)
+    dims_changed = oc != _last_overlay_cols or or_ != _last_overlay_rows
 
-    if current_mode != _last_mode or overlay_sig != _last_overlay_sig:
+    if current_mode != _last_mode or overlay_sig != _last_overlay_sig or dims_changed:
         if current_mode != _last_mode:
             prev_mode = _last_mode
             _last_mode = current_mode
@@ -569,6 +647,9 @@ def notify_web_state_change(ctx: Any) -> None:
                 "mode": current_mode,
                 "prev_mode": prev_mode,
             })
+        if dims_changed:
+            _last_overlay_cols = oc
+            _last_overlay_rows = or_
 
         overlay_msg = _build_overlay_msg(ws, ctx)
         if overlay_msg:

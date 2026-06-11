@@ -1,10 +1,10 @@
 import { hexToRgba, darken } from "./utils.js";
 
-export function createTerminal(theme, termBg) {
+export function createTerminal(theme, termBg, extraOptions) {
   var xtheme = buildXtermTheme(theme, termBg);
-  var t = new Terminal({
+  var opts = Object.assign({
     theme: xtheme,
-    fontFamily: "'JetBrainsMono NFM', 'Symbols Nerd Font', monospace",
+    fontFamily: "'JetBrainsMono NFM', monospace",
     fontSize: 15,
     lineHeight: 1.25,
     cursorBlink: true,
@@ -12,7 +12,8 @@ export function createTerminal(theme, termBg) {
     scrollback: 5000,
     allowProposedApi: true,
     convertEol: false,
-  });
+  }, extraOptions || {});
+  var t = new Terminal(opts);
   var fit = new FitAddon.FitAddon();
   var links = new WebLinksAddon.WebLinksAddon();
   t.loadAddon(fit);
