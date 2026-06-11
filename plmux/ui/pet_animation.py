@@ -8,6 +8,33 @@ from rich.text import Text
 
 from plmux.ui.theme import Theme
 
+_PET_STATS: dict[str, dict[str, object]] = {
+    "cat":     {"hp": 40,  "atk": 30, "def": 20, "spd": 90, "int": 70, "special": "Nine Lives"},
+    "dog":     {"hp": 60,  "atk": 50, "def": 40, "spd": 70, "int": 60, "special": "Loyal Companion"},
+    "bunny":   {"hp": 30,  "atk": 20, "def": 15, "spd": 95, "int": 50, "special": "Hop Away"},
+    "fish":    {"hp": 20,  "atk": 10, "def": 10, "spd": 40, "int": 30, "special": "Bubble Shield"},
+    "penguin": {"hp": 50,  "atk": 40, "def": 50, "spd": 60, "int": 65, "special": "Ice Slide"},
+    "owl":     {"hp": 35,  "atk": 45, "def": 30, "spd": 80, "int": 90, "special": "Night Vision"},
+    "frog":    {"hp": 25,  "atk": 35, "def": 20, "spd": 75, "int": 40, "special": "Tongue Whip"},
+    "snake":   {"hp": 45,  "atk": 55, "def": 35, "spd": 70, "int": 55, "special": "Venom Strike"},
+    "parrot":  {"hp": 30,  "atk": 25, "def": 20, "spd": 85, "int": 75, "special": "Mocking Squawk"},
+    "turtle":  {"hp": 80,  "atk": 20, "def": 95, "spd": 20, "int": 50, "special": "Shell Fortress"},
+    "crab":    {"hp": 50,  "atk": 60, "def": 70, "spd": 45, "int": 35, "special": "Pinch Lock"},
+    "whale":   {"hp": 200, "atk": 80, "def": 60, "spd": 30, "int": 70, "special": "Deep Song"},
+    "ghost":   {"hp": 30,  "atk": 70, "def": 25, "spd": 90, "int": 60, "special": "Phase Through"},
+    "dragon":  {"hp": 150, "atk": 95, "def": 70, "spd": 50, "int": 75, "special": "Fire Breath"},
+    "hamster": {"hp": 15,  "atk": 5,  "def": 10, "spd": 80, "int": 25, "special": "Cheek Pouch"},
+    "octopus": {"hp": 60,  "atk": 50, "def": 40, "spd": 65, "int": 85, "special": "Ink Cloud"},
+}
+
+_STAT_CAPS: dict[str, int] = {
+    "hp": 200,
+    "atk": 100,
+    "def": 100,
+    "spd": 100,
+    "int": 100,
+}
+
 _PETS: dict[str, list[list[str]]] = {
     "cat": [
         [
@@ -778,6 +805,10 @@ def get_pet_names() -> list[str]:
     return list(_PET_NAMES)
 
 
+def get_pet_stats() -> dict[str, dict[str, object]]:
+    return dict(_PET_STATS)
+
+
 def build_pet_overlay(
     theme: Theme,
     *,
@@ -796,7 +827,9 @@ def build_pet_overlay(
     status_lines = _STATUS_LINES.get(pet_type, _STATUS_LINES["cat"])
     status = status_lines[frame % len(status_lines)]
 
-    pet_text = _render_pet(current, status, fg, bg, pane_rows, pane_cols)
+    stats = _PET_STATS.get(pet_type, _PET_STATS["cat"])
+
+    pet_text = _render_pet(current, stats, status, fg, bg, pane_rows, pane_cols)
 
     return Panel(
         Align.center(pet_text, vertical="middle"),
@@ -808,10 +841,21 @@ def build_pet_overlay(
     )
 
 
-def _render_pet(frame_lines: list[str], status: str, fg: str, bg: str, max_rows: int, max_cols: int) -> Text:
+def _render_pet(
+    frame_lines: list[str],
+    stats: dict[str, object],
+    status: str,
+    fg: str,
+    bg: str,
+    max_rows: int,
+    max_cols: int,
+) -> Text:
     result = Text()
 
-    top_pad = max(0, (max_rows - len(frame_lines) - 4) // 2)
+    stat_lines = _build_stat_lines(stats, max_cols - 4)
+    total_height = len(frame_lines) + 1 + len(stat_lines) + 1 + 1
+
+    top_pad = max(0, (max_rows - total_height) // 2)
     for _ in range(top_pad):
         result.append("\n")
 
@@ -820,10 +864,43 @@ def _render_pet(frame_lines: list[str], status: str, fg: str, bg: str, max_rows:
         result.append(padded + "\n", style=f"bold {fg}" if fg else "bold white")
 
     result.append("\n")
+
+    for line in stat_lines:
+        result.append(line + "\n", style=f"{fg}" if fg else "white")
+
+    result.append("\n")
+
     status_centered = status.center(max_cols - 4) if max_cols > 4 else status
     result.append(status_centered, style=f"dim {fg}" if fg else "dim white")
 
     return result
+
+
+def _build_stat_lines(stats: dict[str, object], max_width: int) -> list[str]:
+    hp_ent = _entry("HP", int(stats["hp"]), _STAT_CAPS["hp"])
+    atk_ent = _entry("ATK", int(stats["atk"]), _STAT_CAPS["atk"])
+    def_ent = _entry("DEF", int(stats["def"]), _STAT_CAPS["def"])
+    spd_ent = _entry("SPD", int(stats["spd"]), _STAT_CAPS["spd"])
+    int_ent = _entry("INT", int(stats["int"]), _STAT_CAPS["int"])
+
+    rows = [
+        f"  {hp_ent}    {atk_ent}",
+        f"  {def_ent}    {spd_ent}",
+        f"  {int_ent}",
+        f"   \u25C6 {stats['special']}",
+    ]
+
+    table_w = max(len(r) for r in rows)
+    if max_width >= table_w:
+        return [r.ljust(table_w).center(max_width) for r in rows]
+    return [r.center(max_width) if max_width > len(r) else r for r in rows]
+
+
+def _entry(label: str, value: int, cap: int) -> str:
+    """Fixed-width stat entry (17 chars): '  HP ██████░░ 150'"""
+    filled = min(round(value * 8 / cap), 8)
+    bar = "\u2588" * filled + "\u2591" * (8 - filled)
+    return f"{label:>4} {bar} {value:>3}"
 
 
 def _extract_fg(style_str: str) -> str:
