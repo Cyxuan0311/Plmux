@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from plmux.app import _parse_cmdline_trigger, _parse_prefix_key
+from plmux.app.utils import parse_cmdline_trigger as _parse_cmdline_trigger, parse_prefix_key as _parse_prefix_key
 from plmux.config.loader import load_config, save_user_config
 from plmux.extensions.registry import load_plugins, set_plugin_settings
 from plmux.input.commands import get_completions, run_command_line
