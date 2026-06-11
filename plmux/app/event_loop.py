@@ -8,7 +8,6 @@ import signal
 import sys
 import time
 from datetime import datetime
-from typing import Any
 
 from blessed import Terminal
 from rich.console import Console, ConsoleDimensions

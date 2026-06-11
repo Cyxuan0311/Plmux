@@ -3,12 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-import os
-import sys
 from typing import Any, Callable
 
-from plmux.config.loader import load_config
-from plmux.extensions.registry import ExtensionContext, emit_hook
 from plmux.modes import AppContext
 from plmux.platform.shell import resolve_shell_argv
 from plmux.session.models import tree_from_json

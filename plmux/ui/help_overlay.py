@@ -239,7 +239,9 @@ def _build_copy_mode_table(theme: Theme) -> tuple[Table, list[tuple]]:
 
 
 def _build_about_section(theme: Theme) -> tuple[Table, list[tuple]]:
-    import platform, sys, os
+    import platform
+    import sys
+    import os
     from plmux.input.commands import _COMMANDS
     from plmux.ui.theme import list_themes
 
