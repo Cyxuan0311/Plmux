@@ -99,13 +99,24 @@ def build_clock_overlay(
     pane_cols: int,
     clock_str: str = "",
 ) -> Panel:
-    now = clock_str or datetime.now().strftime("%H:%M:%S")
+    available_width = pane_cols - 4
+
+    if clock_str:
+        fmt_time = clock_str
+    else:
+        now = datetime.now()
+        if available_width >= 64:
+            fmt_time = now.strftime("%H:%M:%S")
+        elif available_width >= 40:
+            fmt_time = now.strftime("%H:%M")
+        else:
+            fmt_time = now.strftime("%H:%M")
 
     fg = _extract_fg(theme.status_clock_style)
     bg = _extract_bg(theme.status_clock_style)
     border = theme.pane_active_border
 
-    clock_text = _render_big_clock(now, fg, bg, pane_rows, pane_cols)
+    clock_text = _render_big_clock(fmt_time, fg, bg, pane_rows, pane_cols)
 
     return Panel(
         Align.center(clock_text, vertical="middle"),
