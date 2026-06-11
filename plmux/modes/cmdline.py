@@ -92,6 +92,9 @@ def handle_cmdline_mode(key, ctx: AppContext) -> None:
         if res.theme_changed:
             ctx.cfg.theme = res.theme_changed
             save_user_config(ctx.cfg, None)
+        if res.show_memory:
+            ctx.mode = "memory"
+            ctx.memory_cursor = 0
         if res.show_help:
             ctx.mode = "help"
             ctx.help_tab = 0

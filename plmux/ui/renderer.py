@@ -19,6 +19,7 @@ from plmux.ui.session_list_overlay import build_session_list_overlay
 from plmux.ui.plugin_list_overlay import build_plugin_list_overlay
 from plmux.ui.layout_list_overlay import build_layout_list_overlay
 from plmux.ui.web_token_overlay import build_web_token_overlay
+from plmux.ui.memory_overlay import build_memory_overlay
 
 
 from plmux.ui.clock_overlay import build_clock_overlay
@@ -519,6 +520,8 @@ def build_root(
     web_token_cursor: int = 0,
     web_token_last_generated: str | None = None,
     web_token_last_mode: str | None = None,
+    memory_active: bool = False,
+    memory_cursor: int = 0,
 ) -> Layout:
     theme = ws.theme
     # support additional status indicators
@@ -793,6 +796,30 @@ def build_root(
                     Layout(status_text, name="status", size=1),
                     Layout(cmd, name="cmd", size=1),
                 )
+    elif memory_active:
+        from plmux.ui.memory_data import collect_all_pane_memory
+        mem_data = collect_all_pane_memory(ws)
+        mem_panel = build_memory_overlay(
+            theme,
+            data=mem_data,
+            cursor=memory_cursor,
+            terminal_width=terminal_width,
+            terminal_height=terminal_height,
+        )
+        centered_mem = Align.center(mem_panel, vertical="middle")
+
+        if status_position == "top":
+            root.split_column(
+                Layout(status_text, name="status", size=1),
+                Layout(centered_mem, name="main"),
+                Layout(cmd, name="cmd", size=1),
+            )
+        else:
+            root.split_column(
+                Layout(centered_mem, name="main"),
+                Layout(status_text, name="status", size=1),
+                Layout(cmd, name="cmd", size=1),
+            )
     elif status_position == "top":
         root.split_column(
             Layout(status_text, name="status", size=1),

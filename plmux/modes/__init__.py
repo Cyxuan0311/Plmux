@@ -71,6 +71,8 @@ class AppContext:
     pet_type: str = ""
     pet_frame: int = 0
 
+    memory_cursor: int = 0
+
     sigint_flagged: bool = False
     hard_quit_requested: bool = False
     completion_hints: str = ""

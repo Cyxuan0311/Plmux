@@ -22,6 +22,7 @@ class CommandResult:
     hard_quit: bool = False
     theme_changed: Optional[str] = None
     show_help: bool = False
+    show_memory: bool = False
     show_theme_list: bool = False
     show_session_list: bool = False
     show_statusbar_style: bool = False
@@ -98,6 +99,10 @@ def _cmd_theme(ws: TmuxServer, args: List[str]) -> CommandResult:
 
 def _cmd_help(ws: TmuxServer, args: List[str]) -> CommandResult:
     return CommandResult(show_help=True)
+
+
+def _cmd_memory(ws: TmuxServer, args: List[str]) -> CommandResult:
+    return CommandResult(show_memory=True)
 
 
 def _cmd_ls(ws: TmuxServer, args: List[str]) -> CommandResult:
@@ -634,6 +639,8 @@ _COMMANDS: Dict[str, Callable] = {
     "unsetenv": _cmd_unset_environment,
     "theme": _cmd_theme,
     "help": _cmd_help,
+    "memory": _cmd_memory,
+    "mem": _cmd_memory,
     "ls": _cmd_ls,
     "sessions": _cmd_ls,
     "statusbar": _cmd_statusbar,

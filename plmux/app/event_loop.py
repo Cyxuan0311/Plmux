@@ -226,6 +226,12 @@ async def async_main(
                 ctx.pet_frame += 1
                 ctx.dirty = True
 
+    async def memory_ticker() -> None:
+        while ctx.running:
+            await asyncio.sleep(2)
+            if ctx.mode == "memory":
+                ctx.dirty = True
+
     async def status_refresh_ticker() -> None:
         while ctx.running:
             await asyncio.sleep(2)
@@ -513,6 +519,7 @@ async def async_main(
     clock_task = asyncio.create_task(clock_ticker())
     status_task = asyncio.create_task(status_refresh_ticker())
     pet_task = asyncio.create_task(pet_ticker())
+    memory_task = asyncio.create_task(memory_ticker())
 
     config_watcher = _ConfigWatcher(config_path)
     config_watcher.start(lambda: setattr(ctx, 'config_reload_pending', True))
@@ -837,10 +844,12 @@ async def async_main(
                             mode=ctx.mode.upper() if ctx.mode != "normal" else "NORMAL",
                             extra_items=extra_items,
                             completion_hints=ctx.completion_hints,
+                            memory_active=(ctx.mode == "memory"),
+                            memory_cursor=ctx.memory_cursor,
                             plugin_overlay_name=ctx.mode if ctx.mode not in (
                                 "normal", "prefix", "cmdline", "help", "esc_wait",
                                 "copy", "theme_list", "session_list", "plugin_list",
-                                "layout_list",
+                                "layout_list", "memory",
                             ) and get_plugin_overlay(ctx.mode) is not None else "",
                             plugin_state=ctx.plugin_state,
                             clock_mode_pane=ctx.clock_mode_pane,
@@ -901,6 +910,7 @@ async def async_main(
     clock_task.cancel()
     status_task.cancel()
     pet_task.cancel()
+    memory_task.cancel()
     try:
         await clock_task
     except asyncio.CancelledError:
@@ -911,6 +921,10 @@ async def async_main(
         pass
     try:
         await pet_task
+    except asyncio.CancelledError:
+        pass
+    try:
+        await memory_task
     except asyncio.CancelledError:
         pass
 

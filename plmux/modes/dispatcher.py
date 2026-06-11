@@ -13,6 +13,7 @@ from plmux.modes.theme_list_mode import handle_theme_list_mode
 from plmux.modes.session_list_mode import handle_session_list_mode
 from plmux.modes.plugin_list_mode import handle_plugin_list_mode
 from plmux.modes.layout_list_mode import handle_layout_list_mode
+from plmux.modes.memory_mode import handle_memory_mode
 from plmux.modes.statusbar_style_mode import handle_statusbar_style_mode
 from plmux.modes.pane_border_style_mode import handle_pane_border_style_mode
 from plmux.modes.web_token_mode import handle_web_token_mode
@@ -29,6 +30,7 @@ _MODE_HANDLERS = {
     "session_list": handle_session_list_mode,
     "plugin_list": handle_plugin_list_mode,
     "layout_list": handle_layout_list_mode,
+    "memory": handle_memory_mode,
     "statusbar_style": handle_statusbar_style_mode,
     "pane_border_style": handle_pane_border_style_mode,
     "web_token": handle_web_token_mode,
