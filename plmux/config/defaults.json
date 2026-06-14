@@ -16,7 +16,8 @@
       "spacing": "compact",
       "mode_indicator": "full",
       "show_window_index": true,
-      "show_pane_index": true
+      "show_pane_index": true,
+      "gradient": false
     },
     "pane_border_style": {
       "box_style": "square",

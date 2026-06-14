@@ -97,6 +97,7 @@ parser_dispatch_csi(FastParser *p, int cmd) {
         s->pending_wrap = 0;
         s->cursor_y -= n;
         if (s->cursor_y < 0) s->cursor_y = 0;
+        s->wrapped[s->cursor_y] = 0;
         break;
     }
     case 'B': {
@@ -104,6 +105,7 @@ parser_dispatch_csi(FastParser *p, int cmd) {
         s->pending_wrap = 0;
         s->cursor_y += n;
         if (s->cursor_y >= s->rows) s->cursor_y = s->rows - 1;
+        s->wrapped[s->cursor_y] = 0;
         break;
     }
     case 'C': {
@@ -126,6 +128,7 @@ parser_dispatch_csi(FastParser *p, int cmd) {
         s->cursor_x = 0;
         s->cursor_y += n;
         if (s->cursor_y >= s->rows) s->cursor_y = s->rows - 1;
+        s->wrapped[s->cursor_y] = 0;
         break;
     }
     case 'F': {
@@ -134,6 +137,7 @@ parser_dispatch_csi(FastParser *p, int cmd) {
         s->cursor_x = 0;
         s->cursor_y -= n;
         if (s->cursor_y < 0) s->cursor_y = 0;
+        s->wrapped[s->cursor_y] = 0;
         break;
     }
     case 'G': {
@@ -158,6 +162,7 @@ parser_dispatch_csi(FastParser *p, int cmd) {
         if (s->cursor_y >= s->rows) s->cursor_y = s->rows - 1;
         if (s->cursor_x < 0) s->cursor_x = 0;
         if (s->cursor_x >= s->cols) s->cursor_x = s->cols - 1;
+        s->wrapped[s->cursor_y] = 0;
         break;
     }
     case 'J': {
@@ -235,6 +240,7 @@ parser_dispatch_csi(FastParser *p, int cmd) {
         s->cursor_y = row - 1;
         if (s->cursor_y < 0) s->cursor_y = 0;
         if (s->cursor_y >= s->rows) s->cursor_y = s->rows - 1;
+        s->wrapped[s->cursor_y] = 0;
         break;
     }
     case 'm': {
@@ -332,6 +338,7 @@ parser_dispatch_csi(FastParser *p, int cmd) {
             s->cur_fg = s->saved_fg;
             s->cur_bg = s->saved_bg;
             s->cur_flags = s->saved_flags;
+            s->wrapped[s->cursor_y] = 0;
         }
         break;
     }
@@ -425,13 +432,16 @@ parser_handle_esc(FastParser *p, int c) {
         break;
     case 'M':
         screen_reverse_index(s);
+        s->wrapped[s->cursor_y] = 0;
         break;
     case 'D':
         screen_line_feed(s);
+        s->wrapped[s->cursor_y] = 0;
         break;
     case 'E':
         s->cursor_x = 0;
         screen_line_feed(s);
+        s->wrapped[s->cursor_y] = 0;
         break;
     case 'H':
         if (s->cursor_x >= 0 && s->cursor_x < s->cols)
@@ -452,6 +462,7 @@ parser_handle_esc(FastParser *p, int c) {
         s->cursor_visible = 1;
         memset(s->tab_stops, 0, (size_t)s->cols);
         for (int x = 0; x < s->cols; x++) s->tab_stops[x] = (x % 8 == 0) ? 1 : 0;
+        memset(s->wrapped, 0, (size_t)s->rows);
         break;
     default:
         break;
@@ -519,8 +530,8 @@ parser_feed_byte(FastParser *p, uint8_t b) {
             }
         } else if (b >= 0x80 && b <= 0x9F) {
             switch (b) {
-            case 0x84: screen_line_feed(s); break;
-            case 0x85: s->cursor_x = 0; screen_line_feed(s); break;
+            case 0x84: screen_line_feed(s); s->wrapped[s->cursor_y] = 0; break;
+            case 0x85: s->cursor_x = 0; screen_line_feed(s); s->wrapped[s->cursor_y] = 0; break;
             case 0x88: if (s->cursor_x < s->cols) s->tab_stops[s->cursor_x] = 1; break;
             case 0x8D: screen_reverse_index(s); break;
             case 0x8E: break;
@@ -554,6 +565,7 @@ parser_feed_byte(FastParser *p, uint8_t b) {
             case 0x0A: case 0x0B: case 0x0C:
                 s->pending_wrap = 0;
                 screen_line_feed(s);
+                s->wrapped[s->cursor_y] = 0;
                 break;
             case 0x0D:
                 s->cursor_x = 0;

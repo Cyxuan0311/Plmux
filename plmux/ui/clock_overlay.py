@@ -8,6 +8,7 @@ from rich.align import Align
 from rich.panel import Panel
 from rich.text import Text
 
+from plmux.ui.gradient import hsl_gradient, pick_base_color, try_parse_hex
 from plmux.ui.theme import Theme
 
 
@@ -140,20 +141,31 @@ def _render_big_clock(time_str: str, fg: str, bg: str, max_rows: int, max_cols: 
     if total_cols > max_cols - 4:
         scale = max(1, (max_cols - 4) // total_cols)
 
+    base = pick_base_color(fg, bg)
+    if base:
+        using_bg = not bool(try_parse_hex(fg) if fg else False)
+        gradient = hsl_gradient(
+            base, num_chars,
+            hue_range=60 if using_bg else 40,
+            light_start_offset=0.30 if using_bg else 0.20,
+            light_end_offset=-0.10 if using_bg else 0.0,
+        )
+    else:
+        gradient = [fg] * num_chars
+
     result = Text()
 
     for row_idx in range(digit_rows):
-        line_parts: list[str] = []
-        for ch in chars:
+        for ch_idx, ch in enumerate(chars):
             glyph = _BIG_DIGITS.get(ch)
             if glyph and row_idx < len(glyph):
-                line_parts.append(glyph[row_idx])
+                segment = glyph[row_idx]
             else:
-                line_parts.append(" " * digit_cols)
-        line = "".join(line_parts)
-        if scale > 1:
-            line = "".join(c * scale for c in line)
-        result.append(line + "\n", style=f"bold {fg}" if fg else "bold white")
+                segment = " " * digit_cols
+            if scale > 1:
+                segment = "".join(c * scale for c in segment)
+            result.append(segment, style=f"bold {gradient[ch_idx]}")
+        result.append("\n")
 
     date_str = datetime.now().strftime("%Y-%m-%d %A")
     result.append("\n")

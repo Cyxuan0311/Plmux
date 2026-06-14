@@ -77,6 +77,99 @@ class TestScreenResize:
         assert cell is not None
         assert cell["data"] == "H"
 
+    def test_resize_shrink_reflows_long_lines(self):
+        """Content beyond new width wraps to continuation rows."""
+        s = _fastscreen.Screen(20, 5)
+        st = _fastscreen.Stream()
+        st.attach(s)
+        st.feed(b"ABCDEFGHIJKLMNOPQRST")
+        s.resize(5, 10)
+        cell_a = s.get_cell(0, 0)
+        cell_j = s.get_cell(0, 9)
+        cell_k = s.get_cell(1, 0)
+        cell_t = s.get_cell(1, 9)
+        assert cell_a["data"] == "A", f"Expected 'A', got {cell_a['data']!r}"
+        assert cell_j["data"] == "J", f"Expected 'J', got {cell_j['data']!r}"
+        assert cell_k["data"] == "K", f"Expected 'K' (wrapped), got {cell_k['data']!r}"
+        assert cell_t["data"] == "T", f"Expected 'T' (wrapped), got {cell_t['data']!r}"
+
+    def test_resize_shrink_no_overflow_stays_unchanged(self):
+        """Rows fitting within new width are copied as-is."""
+        s = _fastscreen.Screen(10, 5)
+        st = _fastscreen.Stream()
+        st.attach(s)
+        st.feed(b"ABC")
+        s.resize(5, 8)
+        cell = s.get_cell(0, 0)
+        assert cell["data"] == "A", f"Expected 'A', got {cell['data']!r}"
+
+    def test_resize_shrink_preserves_multiple_lines(self):
+        """Multiple long lines are each reflowed independently."""
+        s = _fastscreen.Screen(30, 5)
+        st = _fastscreen.Stream()
+        st.attach(s)
+        # The \r\n creates a hard line break, making row 1 a new "logical line"
+        st.feed(b"AAAAAAAAAAAAAAAAAAAAAABBBBBB")  # 26 chars: 24 A's + 6 B's
+        st.feed(b"\r\n")
+        st.feed(b"CCCCCCCCCCCCCCCCCCCCCCCCCCCCCC")  # 30 C's
+        s.resize(8, 10)
+        cell_a = s.get_cell(0, 0)
+        assert cell_a is not None and cell_a["data"] == "A"
+        cell_overflow = s.get_cell(1, 0)
+        assert cell_overflow is not None, "Row 1 should have overflow from row 0"
+        cell_b = s.get_cell(2, 5)
+        assert cell_b is not None and cell_b["data"] == "B", f"Expected 'B' on row 2 col 5, got {cell_b['data'] if cell_b else None!r}"
+
+    def test_resize_grow_unwraps_previous_reflow(self):
+        """Shrink-wrapped content unwraps when grown back to original width."""
+        s = _fastscreen.Screen(20, 5)
+        st = _fastscreen.Stream()
+        st.attach(s)
+        # Put a long line ending with an explicit LF (hard break)
+        st.feed(b"ABCDEFGHIJKLMNOPQRST")  # 20 chars fills entire row
+        st.feed(b"\r\n")
+        st.feed(b"12345")                  # short line
+
+        # Shrink to 10 cols → row 0 wraps to rows 0-1
+        s.resize(5, 10)
+        c0 = s.get_cell(0, 0)
+        c1 = s.get_cell(1, 0)
+        assert c0 is not None and c0["data"] == "A"
+        assert c1 is not None and c1["data"] == "K", "Row 1 should hold wrapped 'KLMNOPQRST'"
+
+        # Grow back to 20 cols → the wrapped line should unwrap to one row
+        s.resize(5, 20)
+        t0 = s.get_cell(0, 0)
+        t9 = s.get_cell(0, 9)
+        t10 = s.get_cell(0, 10)
+        t19 = s.get_cell(0, 19)
+        assert t0 is not None and t0["data"] == "A"
+        assert t9 is not None and t9["data"] == "J"
+        assert t10 is not None and t10["data"] == "K", "After grow-back, 'K' should be on row 0"
+        assert t19 is not None and t19["data"] == "T", "After grow-back, 'T' should be on row 0"
+
+    def test_resize_grow_preserves_hard_breaks(self):
+        """Hard line breaks (explicit LF) keep rows separate on grow-back."""
+        s = _fastscreen.Screen(30, 5)
+        st = _fastscreen.Stream()
+        st.attach(s)
+        st.feed(b"AAAAA")   # 5 chars
+        st.feed(b"\r\n")     # hard break
+        st.feed(b"BBBBB")   # 5 chars
+        st.feed(b"\r\n")     # hard break
+        st.feed(b"CCCCC")   # 5 chars
+
+        # Shrink to 10 cols — all rows still fit (no wrapping needed)
+        s.resize(5, 10)
+        # Grow back to 30 cols — hard breaks must keep rows separate
+        s.resize(5, 30)
+        a0 = s.get_cell(0, 0)
+        b0 = s.get_cell(1, 0)
+        c0 = s.get_cell(2, 0)
+        assert a0 is not None and a0["data"] == "A", f"Expected 'A' on row 0, got {a0['data'] if a0 else None!r}"
+        assert b0 is not None and b0["data"] == "B", f"Expected 'B' on row 1, got {b0['data'] if b0 else None!r}"
+        assert c0 is not None and c0["data"] == "C", f"Expected 'C' on row 2, got {c0['data'] if c0 else None!r}"
+
 
 class TestScreenGetCell:
     def test_get_cell_with_content(self):

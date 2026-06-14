@@ -69,6 +69,7 @@ def _parse_status_bar_style(d: Dict[str, Any]) -> StatusBarStyle:
         mode_indicator=str(d.get("mode_indicator", "full")),
         show_window_index=bool(d.get("show_window_index", True)),
         show_pane_index=bool(d.get("show_pane_index", True)),
+        gradient=bool(d.get("gradient", False)),
     )
 
 
@@ -240,6 +241,7 @@ def save_user_config(cfg: PlmuxConfig, explicit_path: str | None = None) -> None
                 "mode_indicator": cfg.ui.status_bar_style.mode_indicator,
                 "show_window_index": cfg.ui.status_bar_style.show_window_index,
                 "show_pane_index": cfg.ui.status_bar_style.show_pane_index,
+                "gradient": cfg.ui.status_bar_style.gradient,
             },
             "pane_border_style": {
                 "box_style": cfg.ui.pane_border_style.box_style,

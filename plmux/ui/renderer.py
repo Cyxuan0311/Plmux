@@ -23,6 +23,7 @@ from plmux.ui.memory_overlay import build_memory_overlay
 
 
 from plmux.ui.clock_overlay import build_clock_overlay
+from plmux.ui.status_bar_gradient import apply_status_bar_gradient
 from plmux.extensions.registry import get_plugin_overlay, apply_pane_decorators, PaneDecoratorContext, build_status_bar_sections
 from plmux.format import build_format_context_from_ws, expand_format
 from plmux.workspace import TmuxServer
@@ -426,6 +427,9 @@ def build_status_line(
     padding = max(0, terminal_width - left_len - right_len)
     left.append(" " * padding, style=f"on {pane_bg}")
     left.append(right)
+
+    if style_cfg.gradient:
+        apply_status_bar_gradient(left, ws.theme)
 
     return left
 

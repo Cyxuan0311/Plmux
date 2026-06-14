@@ -88,6 +88,7 @@ def _build_option_rows(style: StatusBarStyle) -> list[tuple[str, str, str]]:
         ("Show Pane Idx", "on" if style.show_pane_index else "off", "W0:P1" if style.show_pane_index else "W0"),
         ("Right Sections", style.right_sections, _right_sections_preview(style.right_sections)),
         ("Spacing", style.spacing, "A  B  C" if style.spacing == "spaced" else "A|B|C"),
+        ("Gradient", "on" if style.gradient else "off", "gradient bar" if style.gradient else "solid bar"),
     ]
     return rows
 
@@ -136,6 +137,7 @@ OPTION_NAMES = [
     "show_pane_index",
     "right_sections",
     "spacing",
+    "gradient",
 ]
 
 
@@ -164,6 +166,8 @@ def cycle_option(style: StatusBarStyle, option: str, direction: int = 1) -> None
         opts = list(StatusBarStyle.VALID_SPACING)
         idx = opts.index(style.spacing) if style.spacing in opts else 0
         style.spacing = opts[(idx + direction) % len(opts)]
+    elif option == "gradient":
+        style.gradient = not style.gradient
 
 
 def get_option_count() -> int:

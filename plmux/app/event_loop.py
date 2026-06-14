@@ -225,7 +225,6 @@ async def async_main(
                     inner_cols = max(cfg.ui.min_pane_cols, tw)
                     ctx.content_rows = inner_rows
                     ctx.content_cols = inner_cols
-                    ctx.ws.sync_geometry(inner_rows, inner_cols)
 
                     if remote_mode and ipc_conn is not None:
                         if inner_rows != _last_resize_rows or inner_cols != _last_resize_cols:
@@ -368,6 +367,8 @@ async def async_main(
                                 if not w.panes:
                                     w.tree = 0
                                     w.focus_pane = 0
+
+                    ctx.ws.sync_geometry(inner_rows, inner_cols)
 
                     if ctx.dirty or keys:
                         extra_items = []

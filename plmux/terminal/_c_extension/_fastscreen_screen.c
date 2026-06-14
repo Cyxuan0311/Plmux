@@ -17,6 +17,9 @@ screen_init(FastScreen *s, int cols, int rows) {
     if (!s->tab_stops) { free(s->cells); free(s->dirty_bits); return -1; }
     for (int x = 0; x < cols; x++) s->tab_stops[x] = (x % 8 == 0) ? 1 : 0;
 
+    s->wrapped = (uint8_t *)calloc((size_t)rows, 1);
+    if (!s->wrapped) { free(s->cells); free(s->dirty_bits); free(s->tab_stops); return -1; }
+
     s->cursor_visible = 1;
     s->cursor_saved_visible = 1;
     s->scroll_bottom = rows - 1;
@@ -33,6 +36,7 @@ screen_free(FastScreen *s) {
     free(s->cells);
     free(s->dirty_bits);
     free(s->tab_stops);
+    free(s->wrapped);
     free(s->alt_cells);
     free(s->saved_main_cells);
 }
@@ -61,6 +65,8 @@ screen_scroll_up(FastScreen *s, int n) {
         }
     }
     screen_mark_dirty_range(s, top, bot);
+    memmove(&s->wrapped[top], &s->wrapped[top + n], (size_t)(bot - top - n + 1));
+    memset(&s->wrapped[bot - n + 1], 0, (size_t)n);
 }
 
 void
@@ -83,6 +89,8 @@ screen_scroll_down(FastScreen *s, int n) {
         }
     }
     screen_mark_dirty_range(s, top, bot);
+    memmove(&s->wrapped[top + n], &s->wrapped[top], (size_t)(bot - top - n + 1));
+    memset(&s->wrapped[top], 0, (size_t)n);
 }
 
 void
@@ -121,6 +129,9 @@ screen_put_char(FastScreen *s, uint32_t cp, int width) {
         } else {
             s->cursor_x = s->cols - 1;
         }
+    }
+    if (wrap_was_pending || auto_wrapped) {
+        s->wrapped[s->cursor_y] = 1;
     }
     FastCell *c = screen_cell(s, s->cursor_x, s->cursor_y);
     if (c) {
@@ -193,16 +204,20 @@ screen_erase_display(FastScreen *s, int mode) {
     switch (mode) {
     case 0:
         screen_erase_cells(s, cx, cy, s->cols - 1, cy);
-        if (cy + 1 < s->rows)
+        if (cy + 1 < s->rows) {
             screen_erase_cells(s, 0, cy + 1, s->cols - 1, s->rows - 1);
+            memset(&s->wrapped[cy + 1], 0, (size_t)(s->rows - cy - 1));
+        }
         break;
     case 1:
         screen_erase_cells(s, 0, 0, s->cols - 1, cy - 1);
+        memset(&s->wrapped[0], 0, (size_t)cy);
         screen_erase_cells(s, 0, cy, cx, cy);
         break;
     case 2:
     case 3:
         screen_erase_cells(s, 0, 0, s->cols - 1, s->rows - 1);
+        memset(s->wrapped, 0, (size_t)s->rows);
         break;
     }
 }
@@ -215,6 +230,7 @@ screen_erase_line(FastScreen *s, int mode) {
     case 1: screen_erase_cells(s, 0, cy, cx, cy); break;
     case 2: screen_erase_cells(s, 0, cy, s->cols - 1, cy); break;
     }
+    s->wrapped[cy] = 0;
 }
 
 void
@@ -238,6 +254,8 @@ screen_insert_lines(FastScreen *s, int n) {
         }
     }
     screen_mark_dirty_range(s, top, bot);
+    memmove(&s->wrapped[top + n], &s->wrapped[top], (size_t)(bot - top - n + 1));
+    memset(&s->wrapped[top], 0, (size_t)n);
 }
 
 void
@@ -261,6 +279,8 @@ screen_delete_lines(FastScreen *s, int n) {
         }
     }
     screen_mark_dirty_range(s, top, bot);
+    memmove(&s->wrapped[top], &s->wrapped[top + n], (size_t)(bot - top - n + 1));
+    memset(&s->wrapped[bot - n + 1], 0, (size_t)n);
 }
 
 void
@@ -373,6 +393,68 @@ screen_switch_alt(FastScreen *s, int enable) {
     }
 }
 
+/* Return the column of the last non-empty cell in a row, or -1 if empty. */
+static inline int
+_row_last_content(FastCell *row, int cols) {
+    for (int x = cols - 1; x >= 0; x--) {
+        if (row[x].codepoint) return x;
+    }
+    return -1;
+}
+
+static void
+_resize_reflow(FastScreen *s, FastCell *new_cells, uint8_t *new_wrapped,
+               int new_cols, int new_rows,
+               int old_cols, int old_rows)
+{
+    int src_y = 0, dst_y = 0;
+    while (src_y < old_rows && dst_y < new_rows) {
+        /* Find extent of this logical line (consecutive wrapped rows). */
+        int logical_count = 1;
+        while (src_y + logical_count < old_rows && s->wrapped[src_y + logical_count]) {
+            logical_count++;
+        }
+
+        /* Compute actual content span: last non-empty column across logical rows. */
+        int span = 0;
+        for (int i = 0; i < logical_count; i++) {
+            int last = _row_last_content(&s->cells[(src_y + i) * old_cols], old_cols);
+            if (last >= 0) {
+                int candidate = i * old_cols + last + 1;
+                if (candidate > span) span = candidate;
+            }
+        }
+        if (span == 0) { src_y += logical_count; continue; }
+
+        int written = 0;
+        while (written < span && dst_y < new_rows) {
+            int chunk = new_cols;
+            if (chunk > span - written) chunk = span - written;
+
+            /* Copy `chunk` cells from the logical line at offset `written`. */
+            int sofar = 0;
+            while (sofar < chunk) {
+                int global_off = src_y * old_cols + written + sofar;
+                int src_yr = global_off / old_cols;
+                int src_xc = global_off % old_cols;
+                int avail = old_cols - src_xc;
+                int this_copy = chunk - sofar;
+                if (this_copy > avail) this_copy = avail;
+                memcpy(&new_cells[dst_y * new_cols + sofar],
+                       &s->cells[src_yr * old_cols + src_xc],
+                       (size_t)this_copy * sizeof(FastCell));
+                sofar += this_copy;
+            }
+
+            new_wrapped[dst_y] = (written > 0) ? 1 : 0;
+            written += chunk;
+            dst_y++;
+        }
+
+        src_y += logical_count;
+    }
+}
+
 void
 screen_resize(FastScreen *s, int new_cols, int new_rows) {
     if (new_cols <= 0 || new_rows <= 0) return;
@@ -382,17 +464,18 @@ screen_resize(FastScreen *s, int new_cols, int new_rows) {
     if (!new_cells) return;
     for (int i = 0; i < new_rows * new_cols; i++) cell_clear(&new_cells[i]);
 
-    int copy_rows = old_rows < new_rows ? old_rows : new_rows;
-    int copy_cols = old_cols < new_cols ? old_cols : new_cols;
-    for (int y = 0; y < copy_rows; y++) {
-        memcpy(&new_cells[y * new_cols], &s->cells[y * old_cols],
-               (size_t)copy_cols * sizeof(FastCell));
-    }
+    uint8_t *new_wrapped = (uint8_t *)calloc((size_t)new_rows, 1);
+    if (!new_wrapped) { free(new_cells); return; }
+
+    _resize_reflow(s, new_cells, new_wrapped, new_cols, new_rows, old_cols, old_rows);
 
     free(s->cells);
     s->cells = new_cells;
     s->cols = new_cols;
     s->rows = new_rows;
+
+    free(s->wrapped);
+    s->wrapped = new_wrapped;
 
     if (s->cursor_x >= new_cols) s->cursor_x = new_cols - 1;
     if (s->cursor_y >= new_rows) s->cursor_y = new_rows - 1;

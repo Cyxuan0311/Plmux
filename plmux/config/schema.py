@@ -33,6 +33,7 @@ class StatusBarStyle:
     mode_indicator: str = "full"
     show_window_index: bool = True
     show_pane_index: bool = True
+    gradient: bool = False
 
     VALID_SEPARATORS = ("powerline", "powerline_round", "powerline_diamond", "ascii", "unicode", "unicode_thin", "dots", "pipes", "none")
     VALID_RIGHT_SECTIONS = ("clock_host", "clock", "host", "none")
