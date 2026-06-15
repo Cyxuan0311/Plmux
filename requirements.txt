@@ -8,5 +8,5 @@ jinxed>=1.1.0,<2; sys_platform == "win32"
 pywinpty>=3,<4; sys_platform == "win32"
 
 # Development / Testing
-pytest>=7,<9
+pytest>=7,<10
 pytest-asyncio>=0.21,<1
