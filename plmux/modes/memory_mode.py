@@ -15,6 +15,8 @@ def handle_memory_mode(key, ctx: AppContext) -> None:
         ctx.dirty = True
         return
 
+    max_lines = _count_lines(ctx)
+
     if name in ("KEY_UP",) or ch == "k":
         if ctx.memory_cursor > 0:
             ctx.memory_cursor -= 1
@@ -22,9 +24,28 @@ def handle_memory_mode(key, ctx: AppContext) -> None:
         return
 
     if name in ("KEY_DOWN",) or ch == "j":
-        max_lines = _count_lines(ctx)
         if ctx.memory_cursor < max_lines - 1:
             ctx.memory_cursor += 1
+        ctx.dirty = True
+        return
+
+    if name in ("KEY_HOME",) or ch == "g":
+        ctx.memory_cursor = 0
+        ctx.dirty = True
+        return
+
+    if name in ("KEY_END",) or ch == "G":
+        ctx.memory_cursor = max_lines - 1 if max_lines > 0 else 0
+        ctx.dirty = True
+        return
+
+    if name in ("KEY_PPAGE",):
+        ctx.memory_cursor = max(0, ctx.memory_cursor - 10)
+        ctx.dirty = True
+        return
+
+    if name in ("KEY_NPAGE",):
+        ctx.memory_cursor = min(max_lines - 1, ctx.memory_cursor + 10)
         ctx.dirty = True
         return
 
