@@ -120,6 +120,8 @@ def handle_cmdline_mode(key, ctx: AppContext) -> None:
             ctx.cfg.theme = res.theme_changed
             save_user_config(ctx.cfg, None)
         if res.show_memory:
+            from plmux.ui.memory_data import clear_memory_cache
+            clear_memory_cache()
             ctx.mode = "memory"
             ctx.memory_cursor = 0
         if res.show_help:

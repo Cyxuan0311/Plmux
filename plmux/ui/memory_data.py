@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import platform
+import time
 from typing import Any
 
 _HAS_PSUTIL = False
@@ -12,6 +13,10 @@ try:
     _HAS_PSUTIL = True
 except ImportError:
     pass
+
+_cache: dict[str, Any] = {}
+_cache_ts: float = 0.0
+_cache_ttl: float = 2.0
 
 
 def _read_proc_status(pid: int) -> dict[str, int]:
@@ -197,8 +202,16 @@ def collect_pane_cmd(pane: Any) -> str:
     return "?"
 
 
-def collect_all_pane_memory(ws: Any) -> dict[str, Any]:
+def clear_memory_cache() -> None:
+    global _cache, _cache_ts
+    _cache = {}
+    _cache_ts = 0.0
+
+
+def collect_all_pane_memory(ws: Any, *, force: bool = False) -> dict[str, Any]:
     """Collect memory data for plmux and all pane processes.
+
+    Results are cached for 2 seconds to avoid repeated /proc reads.
 
     Returns:
     {
@@ -222,6 +235,11 @@ def collect_all_pane_memory(ws: Any) -> dict[str, Any]:
         "total_rss": ..., "total_pct": ...,
     }
     """
+    global _cache, _cache_ts
+    now = time.monotonic()
+    if not force and _cache and now - _cache_ts < _cache_ttl:
+        return _cache
+
     sys_mem = get_system_memory()
     sys_total = sys_mem.get("total", 1) or 1
 
@@ -292,4 +310,7 @@ def collect_all_pane_memory(ws: Any) -> dict[str, Any]:
 
     result["total_rss"] = total
     result["total_pct"] = (total / sys_total) * 100
+
+    _cache = result
+    _cache_ts = time.monotonic()
     return result
