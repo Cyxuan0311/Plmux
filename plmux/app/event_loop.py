@@ -28,6 +28,7 @@ from plmux.extensions.registry import (
 from plmux.modes import AppContext
 from plmux.modes.dispatcher import dispatch_key
 from plmux.state_bridge import build_detach_state, build_workspace_from_state
+from plmux.terminal.capture_colors import capture_outer_cursor_color
 from plmux.terminal.session import TerminalSession
 from plmux.ui.geometry import remove_pane_collapse, reindex_after_remove
 from plmux.ui.renderer import build_root
@@ -52,6 +53,7 @@ async def async_main(
 ) -> ServerState | None:
     cfg = load_config(config_path)
     theme = load_theme(cfg.theme)
+    outer_color = capture_outer_cursor_color()
     term = Terminal(force_styling=True)
     console = Console(force_terminal=True)
 
@@ -70,6 +72,7 @@ async def async_main(
         cmdline_trigger_type=parse_cmdline_trigger(cfg.keys.command_line)[0],
         cmdline_trigger_val=parse_cmdline_trigger(cfg.keys.command_line)[1],
         clock_str=datetime.now().strftime("%H:%M:%S"),
+        outer_cursor_color=outer_color,
     )
 
     ipc_conn = None
@@ -86,6 +89,16 @@ async def async_main(
         )
         if snap is not None:
             emit_hook("session_loaded", ExtensionContext(hook_name="session_loaded"))
+
+    if outer_color is not None:
+        r, g, b = outer_color
+        for sess in ctx.ws.sessions_list:
+            for w in sess.windows:
+                for pane in w.panes:
+                    try:
+                        pane.screen.set_cursor_color(r, g, b)
+                    except Exception:
+                        pass
 
     loop = asyncio.get_running_loop()
 

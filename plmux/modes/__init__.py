@@ -97,5 +97,7 @@ class AppContext:
     content_rows: int = 24
     content_cols: int = 80
 
+    outer_cursor_color: tuple[int, int, int] | None = None
+
     def mark_dirty(self) -> None:
         self.dirty = True
