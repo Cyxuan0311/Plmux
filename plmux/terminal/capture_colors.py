@@ -1,13 +1,15 @@
-"""Capture outer terminal colors at startup via OSC queries."""
+"""Capture outer terminal colors at startup via OSC queries.
+
+Note: termios/tty are Unix-only; imported lazily inside the function
+so the module can be imported on Windows without error.
+"""
 
 from __future__ import annotations
 
 import os
 import select
 import sys
-import termios
 import time
-import tty
 
 
 def _parse_osc_color_response(data: bytes) -> tuple[int, int, int] | None:
@@ -56,6 +58,12 @@ def capture_outer_cursor_color() -> tuple[int, int, int] | None:
     """
     fd = sys.stdin.fileno()
     if not os.isatty(fd):
+        return None
+
+    try:
+        import termios
+        import tty
+    except ImportError:
         return None
 
     try:
