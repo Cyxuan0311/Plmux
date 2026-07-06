@@ -28,6 +28,9 @@ screen_init(FastScreen *s, int cols, int rows) {
     s->saved_fg = COLOR_DEFAULT;
     s->saved_bg = COLOR_DEFAULT;
     s->auto_wrap = 1;
+    s->cursor_color = 0;
+    s->default_fg_color = 0;
+    s->default_bg_color = 0;
     return 0;
 }
 

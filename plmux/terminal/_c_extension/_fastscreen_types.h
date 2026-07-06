@@ -142,6 +142,9 @@ typedef struct {
     int       mouse_mode;
     int       scroll_count;
     uint8_t  *wrapped;
+    uint32_t  cursor_color;     /* 0 = default (reverse video), RGB otherwise */
+    uint32_t  default_fg_color; /* 0 = terminal default, RGB if set via OSC 10 */
+    uint32_t  default_bg_color; /* 0 = terminal default, RGB if set via OSC 11 */
 } FastScreen;
 
 static inline FastCell *
