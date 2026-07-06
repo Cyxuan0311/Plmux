@@ -146,6 +146,18 @@ class FastScreen:
             y, int(draw_cursor), cursor_x, cursor_y,
             sel_y1, sel_x1, sel_y2, sel_x2)
 
+    @property
+    def cursor_color(self) -> tuple[int, int, int] | None:
+        """Return (r,g,b) or None if using default reverse cursor."""
+        return self._cscreen.cursor_color
+
+    def set_cursor_color(self, r: int, g: int, b: int) -> None:
+        """Set a custom RGB cursor color. Pass r=g=b=0 to reset to default."""
+        if r == 0 and g == 0 and b == 0:
+            self._cscreen.reset_cursor_color()
+        else:
+            self._cscreen.set_cursor_color(r, g, b)
+
     def dump_raw(self) -> bytes:
         return self._cscreen.dump_raw()
 
@@ -177,3 +189,4 @@ class FastStream:
             self._screen._sync_dirty()
         if self._on_feed is not None:
             self._on_feed(data)
+
