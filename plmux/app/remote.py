@@ -39,11 +39,12 @@ async def setup_remote_mode(ctx: AppContext, cfg: Any, theme: Theme) -> Any:
         return on_write
 
     def _make_remote_session(rows, cols, *, shell=None, env=None):
-        return TerminalSession.create_remote(
+        s = TerminalSession.create_remote(
             rows=rows, cols=cols, argv=resolve_shell_argv(cfg.shell),
             on_update=ctx.mark_dirty,
             on_write=_make_on_write(),
         )
+        return s
 
     ctx.ws._make_session = _make_remote_session
 

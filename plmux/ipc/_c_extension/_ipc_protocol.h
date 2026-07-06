@@ -15,7 +15,6 @@
 #define IPC_MSG_STATE_UPDATE 0x03
 #define IPC_MSG_PANE_CLOSED 0x04
 #define IPC_MSG_BELL        0x05
-
 #define IPC_MSG_KEY     0x80
 #define IPC_MSG_RESIZE  0x81
 #define IPC_MSG_COMMAND 0x82

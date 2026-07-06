@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from typing import Any, Dict
 
 from plmux.daemon import is_server_alive, kill_server
@@ -16,11 +17,23 @@ from plmux.daemon import ServerState, SessionHandle
 from plmux.platform.shell import resolve_shell_argv
 
 
+_json_mode = False
+
+
+def set_json_mode(enabled: bool = True) -> None:
+    global _json_mode
+    _json_mode = enabled
+
+
 def _print(msg: str = "") -> None:
     print(msg)
 
 
-def new_session(session_name: str | None = None) -> None:
+def _print_json(data: Any) -> None:
+    print(json.dumps(data, ensure_ascii=False, default=str))
+
+
+def new_session(session_name: str | None = None, *, json: bool | None = None) -> None:
     cfg = PlmuxConfig()
     argv = resolve_shell_argv(cfg.shell)
     handle = SessionHandle(index=0, fd=-1, pid=-1, rows=24, cols=80, argv=argv)
@@ -31,13 +44,16 @@ def new_session(session_name: str | None = None) -> None:
         sessions_data=sess_data, current_session=0,
     )
     spawn_server_subprocess(state)
-    if session_name:
+    use_json = json if json is not None else _json_mode
+    if use_json:
+        _print_json({"status": "created", "session_name": session_name or ""})
+    elif session_name:
         _print(f"Spawned detached plmux session: {session_name}")
     else:
         _print("Spawned detached plmux server")
 
 
-def rename_window(index: int, name: str) -> None:
+def rename_window(index: int, name: str, *, json: bool | None = None) -> None:
     cfg = PlmuxConfig()
     snap = load_session(cfg)
     if snap is None:
@@ -48,10 +64,14 @@ def rename_window(index: int, name: str) -> None:
     wn[str(index)] = name
     meta["window_names"] = wn
     save_session(cfg, tree=snap.tree, focus_pane=snap.focus_pane, shell=snap.shell or cfg.shell, cwd=snap.cwd, extra_meta=meta)
-    _print(f"Renamed window {index} -> {name}")
+    use_json = json if json is not None else _json_mode
+    if use_json:
+        _print_json({"status": "renamed", "kind": "window", "index": index, "name": name})
+    else:
+        _print(f"Renamed window {index} -> {name}")
 
 
-def rename_session(name: str) -> None:
+def rename_session(name: str, *, json: bool | None = None) -> None:
     cfg = PlmuxConfig()
     snap = load_session(cfg)
     if snap is None:
@@ -60,10 +80,14 @@ def rename_session(name: str) -> None:
     meta = dict(snap.meta or {})
     meta["session_name"] = name
     save_session(cfg, tree=snap.tree, focus_pane=snap.focus_pane, shell=snap.shell or cfg.shell, cwd=snap.cwd, extra_meta=meta)
-    _print(f"Renamed session -> {name}")
+    use_json = json if json is not None else _json_mode
+    if use_json:
+        _print_json({"status": "renamed", "kind": "session", "name": name})
+    else:
+        _print(f"Renamed session -> {name}")
 
 
-def swap_panes(a: int, b: int) -> None:
+def swap_panes(a: int, b: int, *, json: bool | None = None) -> None:
     cfg = PlmuxConfig()
     snap = load_session(cfg)
     if snap is None:
@@ -82,7 +106,11 @@ def swap_panes(a: int, b: int) -> None:
 
     new_tree = _swap_tree(snap.tree)
     save_session(cfg, tree=new_tree, focus_pane=snap.focus_pane, shell=snap.shell or cfg.shell, cwd=snap.cwd, extra_meta=snap.meta)
-    _print(f"Swapped panes {a} <-> {b} in saved session")
+    use_json = json if json is not None else _json_mode
+    if use_json:
+        _print_json({"status": "swapped", "a": a, "b": b})
+    else:
+        _print(f"Swapped panes {a} <-> {b} in saved session")
 
 
 def list_sessions() -> Dict[str, Any]:
@@ -108,8 +136,12 @@ def list_sessions() -> Dict[str, Any]:
         return {"sessions": [], "windows": [], "current_window": 0, "sessions_data": [], "current_session": 0}
 
 
-def cmd_list_sessions() -> None:
+def cmd_list_sessions(json: bool | None = None) -> None:
     data = list_sessions()
+    use_json = json if json is not None else _json_mode
+    if use_json:
+        _print_json(data)
+        return
     sessions = data["sessions"]
     sessions_data = data.get("sessions_data", [])
     current_session = data.get("current_session", 0)
@@ -148,8 +180,12 @@ def cmd_list_sessions() -> None:
     _print()
 
 
-def cmd_list_windows(panes: bool = False) -> None:
+def cmd_list_windows(panes: bool = False, json: bool | None = None) -> None:
     data = list_sessions()
+    use_json = json if json is not None else _json_mode
+    if use_json:
+        _print_json(data)
+        return
     sessions = data["sessions"]
     windows = data.get("windows", [])
     current_window = data.get("current_window", 0)
@@ -229,8 +265,12 @@ def _shell_display(shell_path: str) -> str:
     return shell_path
 
 
-def cmd_kill_server() -> None:
-    if kill_server():
+def cmd_kill_server(json: bool | None = None) -> None:
+    use_json = json if json is not None else _json_mode
+    killed = kill_server()
+    if use_json:
+        _print_json({"status": "killed" if killed else "not_running"})
+    elif killed:
         _print("Server killed")
     else:
         _print("No server running")

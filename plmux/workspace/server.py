@@ -94,7 +94,7 @@ class TmuxServer:
         shell: Optional[list[str]] = None,
         env: Optional[dict] = None,
     ) -> TerminalSession:
-        return TerminalSession(
+        s = TerminalSession(
             rows,
             cols,
             shell=shell if shell is not None else self.cfg.shell,
@@ -102,6 +102,7 @@ class TmuxServer:
             on_update=self._mark,
             scrollback_lines=self.cfg.ui.scrollback_lines,
         )
+        return s
 
     # ── current session access ─────────────────────────────────────
 

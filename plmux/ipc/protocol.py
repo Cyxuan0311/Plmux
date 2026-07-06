@@ -37,7 +37,6 @@ class MsgType:
     STATE_UPDATE: int = 0x03
     PANE_CLOSED: int = 0x04
     BELL: int = 0x05
-
     KEY: int = 0x80
     RESIZE: int = 0x81
     COMMAND: int = 0x82

@@ -22,7 +22,7 @@
 一个轻量级的跨平台终端复用工具，灵感来源于 tmux，基于 Python、Rich 和 C 扩展构建。提供窗格分割、窗口管理、鼠标支持（滚轮滚动、点击切换焦点、拖拽调整大小）、复制模式、Vim 风格命令接口、动态状态栏（实时显示前台进程）、36 款内置主题、多会话支持、Server/Client 架构与 IPC 通信、会话持久化、浏览器 Web 客户端，类 tmux 的插件扩展系统，以及配置热更新支持。
 
 <div align="center">
-  <img src="resource/demo.png" alt="plmux demo" />
+  <img src="resource/demo2.png" alt="plmux demo" />
   <p>plmux 在 Windows 终端中的操作演示(wsl2 环境)</p>
 </div>
 

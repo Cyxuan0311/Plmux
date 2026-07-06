@@ -181,7 +181,8 @@ def _build_session_from_state(
     pane_count = sess_data.get("pane_count", 0)
 
     def dummy_make_session(rows, cols, *, shell=None, env=None):
-        return TerminalSession(rows, cols, shell=shell or cfg.shell, env=env or cfg.env, on_update=mark, scrollback_lines=cfg.ui.scrollback_lines)
+        s = TerminalSession(rows, cols, shell=shell or cfg.shell, env=env or cfg.env, on_update=mark, scrollback_lines=cfg.ui.scrollback_lines)
+        return s
 
     sess = Session.__new__(Session)
     sess.cfg = cfg

@@ -21,7 +21,7 @@
 A lightweight, cross-platform terminal multiplexer inspired by tmux, built with Python, Rich, and C extensions. It provides pane splitting, window management, mouse support (scroll, click-to-focus, drag-to-resize), copy mode, a vim-style command interface, dynamic status bar with foreground process display, 36 built-in themes, multi-session support, server/client architecture with IPC, session persistence, a browser-based web client, a tmux-like plugin extension system, and hot-reloadable configuration.
 
 <div align="center">
-  <img src="resource/demo.png" alt="plmux demo" />
+  <img src="resource/demo2.png" alt="plmux demo" />
   <p>plmux operation in windows terminal(wsl2)</p>
 </div>
 

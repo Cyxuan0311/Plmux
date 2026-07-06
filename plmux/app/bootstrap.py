@@ -30,26 +30,35 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     sub = p.add_subparsers(dest="command", title="commands", metavar="COMMAND")
 
-    sub.add_parser("ls", aliases=["list-sessions"], help="List active sessions")
-    ls_p = sub.add_parser("lsw", aliases=["list-windows"], help="List windows")
-    ls_p.add_argument("-p", "--panes", action="store_true", help="Also list panes in each window")
+    ls_p = sub.add_parser("ls", aliases=["list-sessions"], help="List active sessions")
+    ls_p.add_argument("--json", action="store_true", help="Output as JSON")
+    ls_p2 = sub.add_parser("lsw", aliases=["list-windows"], help="List windows")
+    ls_p2.add_argument("-p", "--panes", action="store_true", help="Also list panes in each window")
+    ls_p2.add_argument("--json", action="store_true", help="Output as JSON")
     attach_p = sub.add_parser("attach", aliases=["a"], help="Attach to an existing session")
     attach_p.add_argument("session", nargs="?", default=None, help="Pane index to focus (optional)")
-    sub.add_parser("kill-server", help="Kill the running plmux daemon")
+    ks_p = sub.add_parser("kill-server", help="Kill the running plmux daemon")
+    ks_p.add_argument("--json", action="store_true", help="Output as JSON")
     new_sess_p = sub.add_parser("new-session", help="Create a new detached plmux session")
     new_sess_p.add_argument("-s", "--session-name", default=None, help="Name for the new session")
+    new_sess_p.add_argument("--json", action="store_true", help="Output as JSON")
     rn_win_p = sub.add_parser("rename-window", help="Set a name for a window in saved session")
     rn_win_p.add_argument("index", type=int, help="Window index")
     rn_win_p.add_argument("name", help="New window name")
+    rn_win_p.add_argument("--json", action="store_true", help="Output as JSON")
     rn_sess_p = sub.add_parser("rename-session", help="Set a name for the saved session")
     rn_sess_p.add_argument("name", help="New session name")
-    sub.add_parser("swap-pane", help="Swap two pane indices in saved session")
+    rn_sess_p.add_argument("--json", action="store_true", help="Output as JSON")
+    sw_p = sub.add_parser("swap-pane", help="Swap two pane indices in saved session")
+    sw_p.add_argument("--json", action="store_true", help="Output as JSON")
 
     p.add_argument("--config", "-c", default=None, help="Path to config.json")
     p.add_argument("--debug", "-d", action="store_true", default=False, help="Enable debug logging to plmux_debug.log")
     p.add_argument("--version", "-v", action="version", version=f"%(prog)s {__version__}")
     p.add_argument("--serve", default=None, help=argparse.SUPPRESS)
     p.add_argument("--daemon", action="store_true", default=False, help=argparse.SUPPRESS)
+    p.add_argument("--mcp", action="store_true", default=False, help=argparse.SUPPRESS)
+    p.add_argument("--serve-rest", action="store_true", default=False, help=argparse.SUPPRESS)
     return p
 
 
@@ -135,29 +144,39 @@ def run(argv: list[str] | None = None) -> None:
         asyncio.run(run_daemon_from_config(cfg, restore=snap))
         return
 
+    if ns.mcp:
+        from plmux.tools.mcp_server import run_mcp_server
+        asyncio.run(run_mcp_server(ns.config, debug=ns.debug))
+        return
+
+    if ns.serve_rest:
+        from plmux.tools.rest_server import run_rest_server
+        asyncio.run(run_rest_server(ns.config, debug=ns.debug))
+        return
+
     if ns.command in ("ls", "list-sessions"):
-        cmd_list_sessions()
+        cmd_list_sessions(json=getattr(ns, "json", False))
         return
 
     if ns.command in ("lsw", "list-windows"):
-        cmd_list_windows(panes=getattr(ns, "panes", False))
+        cmd_list_windows(panes=getattr(ns, "panes", False), json=getattr(ns, "json", False))
         return
 
     if ns.command == "kill-server":
-        cmd_kill_server()
+        cmd_kill_server(json=getattr(ns, "json", False))
         return
 
     if ns.command == "new-session":
         session_name = getattr(ns, "session_name", None)
-        new_session(session_name=session_name)
+        new_session(session_name=session_name, json=getattr(ns, "json", False))
         return
 
     if ns.command == "rename-window":
-        rename_window(ns.index, ns.name)
+        rename_window(ns.index, ns.name, json=getattr(ns, "json", False))
         return
 
     if ns.command == "rename-session":
-        rename_session(ns.name)
+        rename_session(ns.name, json=getattr(ns, "json", False))
         return
 
     try:

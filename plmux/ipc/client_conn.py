@@ -109,7 +109,6 @@ class ServerConnection:
             pane_idx = parse_bell(payload)
             if self._on_bell:
                 self._on_bell(pane_idx)
-
     async def send_key(self, pane_idx: int, data: bytes) -> None:
         frame = self._writer.key(pane_idx, data)
         await self._send_raw(frame)

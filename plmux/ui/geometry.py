@@ -151,3 +151,23 @@ def assign_rects(
 
     walk(tree, row, col, max(1, rows), max(1, cols))
     return out
+
+
+def get_pane_outer_position(
+    pane_idx: int,
+    tree: Tree,
+    status_position: str,
+    content_rows: int,
+    content_cols: int,
+) -> tuple[int, int]:
+    """Return (outer_row, outer_col) of a pane's top-left content corner
+    in the outer terminal coordinate system (1-indexed).
+
+    Accounts for status bar offset and pane Panel 1-char border.
+    """
+    rects = assign_rects(tree, 0, 0, content_rows, content_cols)
+    r = rects.get(pane_idx)
+    if r is None:
+        return 1, 1
+    row_off = 1 if status_position == "top" else 0
+    return row_off + r.row + 1, r.col + 1

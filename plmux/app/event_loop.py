@@ -198,7 +198,7 @@ async def async_main(
         with Live(
             console=console,
             screen=cfg.ui.use_alternate_screen,
-            refresh_per_second=refresh,
+            auto_refresh=False,
         ) as live:
             try:
                 from blessed.dec_modes import DecPrivateMode
@@ -239,10 +239,11 @@ async def async_main(
                     ctx.content_rows = inner_rows
                     ctx.content_cols = inner_cols
 
-                    if remote_mode and ipc_conn is not None:
-                        if inner_rows != _last_resize_rows or inner_cols != _last_resize_cols:
-                            _last_resize_rows = inner_rows
-                            _last_resize_cols = inner_cols
+                    if inner_rows != _last_resize_rows or inner_cols != _last_resize_cols:
+                        _last_resize_rows = inner_rows
+                        _last_resize_cols = inner_cols
+                        ctx.dirty = True
+                        if remote_mode and ipc_conn is not None:
                             try:
                                 asyncio.ensure_future(ipc_conn.send_resize(inner_rows, inner_cols))
                             except Exception:
@@ -250,6 +251,8 @@ async def async_main(
 
                     if not remote_mode:
                         TerminalSession.pump_all_sessions(ctx.ws.all_panes())
+                        if ctx.dirty:
+                            term.stream.flush()
                     else:
                         for sess in ctx.ws.sessions_list:
                             for w in sess.windows:
@@ -469,6 +472,7 @@ async def async_main(
                             web_token_last_mode=ctx.web_token_last_mode,
                         )
                         live.update(root)
+                        live.refresh()
                         ctx.dirty = False
 
                     if ctx.display_panes_active and time.monotonic() > ctx.display_panes_until:

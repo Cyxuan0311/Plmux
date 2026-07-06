@@ -380,6 +380,15 @@ class WebClientServer:
         path = parsed.path
         query = parse_qs(parsed.query)
 
+        method = request.split(" ")[0] if " " in request else "GET"
+        body = b""
+        content_length = int(headers.get("content-length", 0))
+        if content_length > 0 and path.startswith("/api/"):
+            try:
+                body = await asyncio.wait_for(reader.readexactly(content_length), timeout=5.0)
+            except (asyncio.IncompleteReadError, asyncio.TimeoutError):
+                pass
+
         if is_ws and "/ws" in path:
             token_value = query.get("token", [None])[0]
             auth_mode = self._check_auth(token_value, headers)
@@ -402,6 +411,8 @@ class WebClientServer:
                 return
             session_name = path[len("/session/"):]
             await self._serve_html(writer, auth_mode, session=session_name)
+        elif path.startswith("/api/"):
+            await self._serve_api_request(method=method, path=path, body=body, headers=headers, writer=writer)
         elif request.startswith("GET /"):
             path_only = path.split("?")[0]
             if path_only.startswith("/static/"):
@@ -426,6 +437,238 @@ class WebClientServer:
             if mode:
                 return mode
         return None
+
+    async def _serve_api_request(
+        self,
+        method: str,
+        path: str,
+        body: bytes,
+        headers: dict[str, str],
+        writer: asyncio.StreamWriter,
+    ) -> None:
+        import json as _json
+
+        if self.auth_enabled:
+            token = None
+            auth_header = headers.get("authorization", "")
+            if auth_header.startswith("Bearer "):
+                token = auth_header[7:]
+            auth_mode = self.token_manager.validate(token) if token else None
+            if auth_mode is None:
+                data = self._json_resp({"success": False, "error": "unauthorized"}, 401)
+                writer.write(data)
+                await writer.drain()
+                writer.close()
+                return
+
+        if path == "/api/tokens" and self.auth_enabled:
+            await self._serve_token_api(writer, headers)
+            return
+
+        parsed_body: dict = {}
+        if body and method in ("POST", "PUT"):
+            try:
+                parsed_body = _json.loads(body.decode("utf-8"))
+            except (_json.JSONDecodeError, UnicodeDecodeError):
+                data = self._json_resp({"success": False, "error": "Invalid JSON body"})
+                writer.write(data)
+                await writer.drain()
+                writer.close()
+                return
+
+        ws = self.ws_ref
+        resp = await self._handle_api_route(method, path, parsed_body, ws)
+        try:
+            writer.write(resp)
+            await writer.drain()
+        except Exception:
+            pass
+        writer.close()
+
+    def _json_resp(self, data: dict, status: int = 200) -> bytes:
+        import json as _json
+        body = _json.dumps(data, ensure_ascii=False, default=str).encode("utf-8")
+        status_text = {200: "OK", 400: "Bad Request", 404: "Not Found", 405: "Method Not Allowed", 500: "Internal Server Error"}
+        header = (
+            f"HTTP/1.1 {status} {status_text.get(status, 'Unknown')}\r\n"
+            f"Content-Type: application/json; charset=utf-8\r\n"
+            f"Content-Length: {len(body)}\r\n"
+            f"Access-Control-Allow-Origin: *\r\n"
+            f"Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS\r\n"
+            f"Access-Control-Allow-Headers: Content-Type, Authorization\r\n"
+            f"Connection: close\r\n\r\n"
+        ).encode("utf-8")
+        return header + body
+
+    async def _handle_api_route(self, method: str, path: str, parsed_body: dict, ws) -> bytes:
+        from plmux.tools.rest_commands import action_list
+
+        if method == "OPTIONS":
+            return self._json_resp({"success": True})
+
+        if path == "/api" or path == "/api/":
+            return self._json_resp({
+                "success": True,
+                "data": {
+                    "name": "plmux REST API (embedded)",
+                    "endpoints": {
+                        "GET /api": "This info",
+                        "GET /api/actions": "List all available actions",
+                        "GET /api/sessions": "List sessions",
+                        "GET /api/status": "Server status",
+                        "POST /api/command": "Execute action",
+                    },
+                },
+            })
+
+        if path == "/api/actions":
+            return self._json_resp({"success": True, "data": action_list()})
+
+        if path == "/api/sessions" or path == "/api/panes":
+            info = {}
+            if ws and hasattr(ws, "sessions_list"):
+                sessions_data = []
+                for sess in ws.sessions_list:
+                    windows_data = []
+                    for w in sess.windows:
+                        windows_data.append({"tree": str(w.tree), "focus_pane": w.focus_pane, "pane_count": len(w.panes)})
+                    sessions_data.append({
+                        "name": sess.name,
+                        "windows": windows_data,
+                        "current_window": sess.current_window,
+                        "pane_count": len(sess.sessions),
+                    })
+                info = {
+                    "current_session": ws.current_session,
+                    "sessions_data": sessions_data,
+                }
+            return self._json_resp({"success": True, "data": info})
+
+        if path == "/api/status":
+            alive = ws is not None
+            info = {"alive": alive}
+            if ws and hasattr(ws, "all_panes"):
+                info["pane_count"] = len(ws.all_panes())
+                info["session_count"] = len(ws.sessions_list)
+            return self._json_resp({"success": True, "data": info})
+
+        if path == "/api/command" or path.startswith("/api/command/"):
+            if method != "POST":
+                return self._json_resp({"success": False, "error": "Use POST"}, 405)
+
+            if path.startswith("/api/command/"):
+                action = path[len("/api/command/"):]
+                params = parsed_body.get("params", {})
+            else:
+                action = parsed_body.get("action", "")
+                params = parsed_body.get("params", {})
+
+            if not action:
+                return self._json_resp({"success": False, "error": "Missing 'action' field"})
+
+            result = await self._dispatch_action(ws, action, params)
+            if result.get("success"):
+                return self._json_resp({"success": True, "data": result.get("data"), "message": result.get("message", "ok")})
+            return self._json_resp({"success": False, "error": result.get("message", "Failed")}, 400)
+
+        return self._json_resp({"success": False, "error": "Not found"}, 404)
+
+    async def _dispatch_action(self, ws, action: str, params: dict) -> dict:
+        from plmux.tools.rest_commands import _build_ipc_command
+
+        if ws is None:
+            return {"success": False, "message": "No workspace available"}
+
+        cmd = _build_ipc_command(action, params)
+        if cmd is None:
+            return self._dispatch_action_direct(ws, action, params)
+
+        _action = cmd.get("action", "")
+        try:
+            if _action == "split":
+                ws.split(cmd.get("direction", "row"))
+            elif _action == "only_pane":
+                ws.only_pane()
+            elif _action == "new_window":
+                ws.new_window()
+            elif _action == "close_window":
+                ws.close_window()
+            elif _action == "next_window":
+                ws.next_window()
+            elif _action == "prev_window":
+                ws.prev_window()
+            elif _action == "goto_window":
+                ws.goto_window(cmd.get("index", 0))
+            elif _action == "set_focus_pane":
+                ws.set_focus_pane(cmd.get("index", 0))
+            elif _action == "focus_direction":
+                ws.focus_direction(cmd.get("direction", "left"))
+            elif _action == "kill_pane":
+                idx = cmd.get("pane_index")
+                if idx is not None:
+                    ws.remove_pane(idx)
+                else:
+                    ws.remove_pane(ws.focus_pane)
+            elif _action == "swap_pane":
+                ws.swap_pane(cmd.get("direction", "up"))
+            elif _action == "break_pane":
+                ws.break_pane()
+            elif _action == "join_pane":
+                ws.join_pane(cmd.get("direction", "row"))
+            elif _action == "respawn_pane":
+                ws.respawn_pane(cmd.get("pane_index"))
+            elif _action == "resize_pane":
+                ws.resize_pane(cmd.get("direction", "left"))
+            elif _action == "toggle_zoom":
+                ws.toggle_zoom()
+            elif _action == "rotate_panes":
+                ws.rotate_panes(cmd.get("direction", "up"))
+            elif _action == "cycle_layout":
+                ws.cycle_layout()
+            elif _action == "send_keys":
+                ws.send_keys(cmd.get("text", ""))
+            elif _action == "rename_window":
+                ws.rename_window(cmd.get("name", ""))
+            elif _action == "rename_session":
+                ws.rename_session(cmd.get("name", ""))
+            elif _action == "new_session":
+                ws.new_session(cmd.get("name", ""))
+            elif _action == "switch_session":
+                ws.switch_session(cmd.get("index", 0))
+            elif _action == "kill_session":
+                ws.kill_session(cmd.get("index"))
+            elif _action == "next_session":
+                ws.next_session()
+            elif _action == "prev_session":
+                ws.prev_session()
+            elif _action == "apply_layout_template":
+                ws.apply_layout_template(cmd.get("name", ""))
+            elif _action == "display_panes":
+                pass
+            else:
+                return {"success": False, "message": f"Unknown action: {_action}"}
+            return {"success": True, "message": f"Action '{action}' executed", "data": cmd}
+        except Exception as e:
+            return {"success": False, "message": f"Action failed: {e}"}
+
+    def _dispatch_action_direct(self, ws, action: str, params: dict) -> dict:
+        handlers = {
+            "set_option": lambda: None,
+            "show_options": lambda: None,
+            "reload_config": lambda: None,
+            "list_themes": lambda: None,
+            "set_theme": lambda: None,
+            "server_status": lambda: None,
+            "help": lambda: None,
+        }
+        handler = handlers.get(action)
+        if handler:
+            try:
+                handler()
+                return {"success": True, "message": f"Action '{action}' dispatched"}
+            except Exception as e:
+                return {"success": False, "message": str(e)}
+        return {"success": False, "message": f"Unknown action: {action}"}
 
     async def _serve_html(
         self,

@@ -18,6 +18,7 @@ try:
 except ImportError:
     _fcntl = None  # type: ignore[misc, assignment]
 
+from plmux.debug_log import dbg
 from plmux.terminal.fastscreen import FastScreen as Screen, FastStream as ByteStream
 from rich.console import Console
 from rich.measure import Measurement
@@ -27,7 +28,7 @@ from plmux.platform.pty_factory import spawn_pty
 from plmux.platform.pty_handle import PtyHandle
 from plmux.platform.shell import resolve_shell_argv
 from plmux.terminal.pyte_render import _cursor_overlay_style, _safe_glyph
-from plmux.debug_log import dbg, win_dbg, is_debug_enabled
+from plmux.debug_log import win_dbg, is_debug_enabled
 
 _OSC_RE = re.compile(r"\x1b\][^\x07]*\x07")
 
