@@ -460,6 +460,9 @@ parser_handle_esc(FastParser *p, int c) {
         s->origin_mode = 0;
         s->auto_wrap = 1;
         s->cursor_visible = 1;
+        s->cursor_color = 0;
+        s->default_fg_color = 0;
+        s->default_bg_color = 0;
         memset(s->tab_stops, 0, (size_t)s->cols);
         for (int x = 0; x < s->cols; x++) s->tab_stops[x] = (x % 8 == 0) ? 1 : 0;
         memset(s->wrapped, 0, (size_t)s->rows);
@@ -505,6 +508,165 @@ parser_dec_special(int cp) {
     case '}': return 0x00A3;
     case '~': return 0x00B7;
     default: return cp;
+    }
+}
+
+/* ================================================================
+   OSC color parsing helpers
+   ================================================================ */
+
+/* Parse a hex digit character to its value (0-15), or -1 on error. */
+static int
+_hex_val(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
+/* Parse #RRGGBB → RGB packed. Returns 0xFFFFFFFF on error. */
+static uint32_t
+_parse_hex_color(const char *s) {
+    if (!s || s[0] != '#') return 0xFFFFFFFF;
+    int r1 = _hex_val(s[1]), r2 = _hex_val(s[2]);
+    int g1 = _hex_val(s[3]), g2 = _hex_val(s[4]);
+    int b1 = _hex_val(s[5]), b2 = _hex_val(s[6]);
+    if (r1 < 0 || r2 < 0 || g1 < 0 || g2 < 0 || b1 < 0 || b2 < 0)
+        return 0xFFFFFFFF;
+    int r = (r1 << 4) | r2;
+    int g = (g1 << 4) | g2;
+    int b = (b1 << 4) | b2;
+    return color_rgb(r, g, b);
+}
+
+/* Parse rgb:RRRR/GGGG/BBBB (xterm query response format) → RGB packed.
+   Each component is 1-4 hex digits; we take the high 8 bits. */
+static uint32_t
+_parse_xterm_rgb(const char *s) {
+    if (!s || strncmp(s, "rgb:", 4) != 0) return 0xFFFFFFFF;
+    s += 4;
+    /* Parse red up to '/' */
+    int r = 0, g = 0, b = 0;
+    int shift = 0;
+    const char *p = s;
+    while (*p && *p != '/') { shift += 4; p++; }
+    p = s;
+    while (*p && *p != '/') {
+        int v = _hex_val(*p);
+        if (v < 0) return 0xFFFFFFFF;
+        shift -= 4;
+        r |= (v << shift);
+        p++;
+    }
+    if (*p != '/') return 0xFFFFFFFF;
+    p++; /* skip '/' */
+    s = p;
+    shift = 0;
+    while (*p && *p != '/') { shift += 4; p++; }
+    p = s;
+    while (*p && *p != '/') {
+        int v = _hex_val(*p);
+        if (v < 0) return 0xFFFFFFFF;
+        shift -= 4;
+        g |= (v << shift);
+        p++;
+    }
+    if (*p != '/') return 0xFFFFFFFF;
+    p++; /* skip '/' */
+    s = p;
+    shift = 0;
+    p = s;
+    while (*p) { shift += 4; p++; }
+    p = s;
+    while (*p) {
+        int v = _hex_val(*p);
+        if (v < 0) return 0xFFFFFFFF;
+        shift -= 4;
+        b |= (v << shift);
+        p++;
+    }
+    return color_rgb(r, g, b);
+}
+
+/* Parse an OSC color string.
+   Supports: #RRGGBB, rgb:RRRR/GGGG/BBBB.
+   Returns 0xFFFFFFFF on error, else a COLOR_TYPE_RGB value. */
+static uint32_t
+_parse_osc_color(const char *s) {
+    if (!s || *s == '\0') return 0xFFFFFFFF;
+    /* Skip leading whitespace */
+    while (*s == ' ' || *s == '\t') s++;
+    if (*s == '#') return _parse_hex_color(s);
+    if (strncmp(s, "rgb:", 4) == 0) return _parse_xterm_rgb(s);
+    return 0xFFFFFFFF;
+}
+
+/* Dispatch an OSC command once the full string has been collected. */
+static void
+parser_dispatch_osc(FastParser *p) {
+    FastScreen *s = p->screen;
+    char *buf = p->osc_buf;
+    if (buf[0] == '\0') return;
+
+    /* Parse the OSC number (digits before first ';') */
+    int osc_num = 0;
+    char *rest = buf;
+    while (*rest >= '0' && *rest <= '9') {
+        osc_num = osc_num * 10 + (*rest - '0');
+        rest++;
+    }
+    if (*rest == ';') rest++;
+    /* Skip any remaining whitespace before the value */
+    while (*rest == ' ' || *rest == '\t') rest++;
+
+    switch (osc_num) {
+    case 10: /* Set default foreground color */
+    {
+        uint32_t color = _parse_osc_color(rest);
+        if (color != 0xFFFFFFFF) {
+            s->default_fg_color = color;
+        }
+        break;
+    }
+    case 11: /* Set default background color */
+    {
+        uint32_t color = _parse_osc_color(rest);
+        if (color != 0xFFFFFFFF) {
+            s->default_bg_color = color;
+        }
+        break;
+    }
+    case 12: /* Set cursor color */
+    {
+        uint32_t color = _parse_osc_color(rest);
+        if (color != 0xFFFFFFFF) {
+            s->cursor_color = color;
+        }
+        break;
+    }
+    case 4: /* Set ANSI color number N */
+    {
+        /* Format: OSC 4 ; N ; color */
+        char *val = rest;
+        while (*val >= '0' && *val <= '9') val++;
+        if (*val == ';') {
+            int color_idx = 0;
+            const char *num = rest;
+            while (*num >= '0' && *num <= '9') {
+                color_idx = color_idx * 10 + (*num - '0');
+                num++;
+            }
+            val++; /* skip ';' */
+            while (*val == ' ' || *val == '\t') val++;
+            uint32_t color = _parse_osc_color(val);
+            if (color != 0xFFFFFFFF && color_idx >= 0 && color_idx < 256) {
+                /* Store in an ANSI palette table if wanted; for now ignore */
+            }
+        }
+        break;
+    }
+    default:
+        break;
     }
 }
 
@@ -716,8 +878,13 @@ parser_feed_byte(FastParser *p, uint8_t b) {
     case ST_OSC_STRING:
         if (b == 0x07 || b == 0x9C) {
             p->osc_buf[p->osc_len] = '\0';
+            parser_dispatch_osc(p);
             p->state = ST_GROUND;
         } else if (b == 0x1B) {
+            if (p->osc_len > 0) {
+                p->osc_buf[p->osc_len] = '\0';
+                parser_dispatch_osc(p);
+            }
             p->state = ST_ESC;
         } else if (b >= 0x20 && p->osc_len < OSC_BUF_SIZE - 1) {
             p->osc_buf[p->osc_len++] = (char)b;
@@ -725,29 +892,55 @@ parser_feed_byte(FastParser *p, uint8_t b) {
         break;
 
     case ST_DCS_ENTRY:
+        if (b == 0x1B) {
+            p->state = ST_DCS_IGNORE;
+        } else if (b == 0x9C) {
+            p->state = ST_GROUND;
+        } else if (b >= 0x40 && b <= 0x7E) {
+            p->dcs_collect[0] = (char)b;
+            p->dcs_collect_len = 1;
+            p->state = ST_DCS_DATA;
+        } else if (b >= 0x30 && b <= 0x3B) {
+            p->state = ST_DCS_PARAM;
+        } else {
+            p->state = ST_GROUND;
+        }
+        break;
+
     case ST_DCS_PARAM:
+        if (b == 0x1B) {
+            p->state = ST_DCS_IGNORE;
+        } else if (b == 0x9C) {
+            p->state = ST_GROUND;
+        } else if (b >= 0x40 && b <= 0x7E) {
+            p->dcs_collect[0] = (char)b;
+            p->dcs_collect_len = 1;
+            p->state = ST_DCS_DATA;
+        } else if (b >= 0x30 && b <= 0x3B) {
+            /* continue collecting params */
+        } else {
+            p->state = ST_GROUND;
+        }
+        break;
+
     case ST_DCS_DATA:
         if (b == 0x1B) {
             p->state = ST_DCS_IGNORE;
         } else if (b == 0x9C) {
             p->state = ST_GROUND;
-        } else if (b >= 0x40 && p->state == ST_DCS_ENTRY) {
-            p->state = ST_DCS_DATA;
-        } else if (b >= 0x30 && b <= 0x3B && p->state == ST_DCS_ENTRY) {
-            p->state = ST_DCS_PARAM;
         }
         break;
 
     case ST_DCS_IGNORE:
-        if (b == 0x9C || (b == '\\')) {
+        if (b == 0x9C) {
+            p->state = ST_GROUND;
+        } else if (b == '\\') {
             p->state = ST_GROUND;
         }
         break;
 
     case ST_SOS_PM_APC:
-        if (b == 0x1B) {
-            /* might be ST */
-        } else if (b == 0x9C || (b == '\\')) {
+        if (b == 0x9C || b == '\\') {
             p->state = ST_GROUND;
         }
         break;
