@@ -182,6 +182,32 @@ FastScreen_get_mouse_mode(FastScreenObject *self, void *closure) {
 }
 
 static PyObject *
+FastScreen_get_cursor_color(FastScreenObject *self, void *closure) {
+    uint32_t cc = self->screen.cursor_color;
+    if (cc == 0 || color_type(cc) != 3) {
+        Py_RETURN_NONE;
+    }
+    int r, g, b;
+    color_rgb_val(cc, &r, &g, &b);
+    return Py_BuildValue("(iii)", r, g, b);
+}
+
+static PyObject *
+FastScreen_set_cursor_color(FastScreenObject *self, PyObject *args) {
+    int r, g, b;
+    if (!PyArg_ParseTuple(args, "iii", &r, &g, &b))
+        return NULL;
+    self->screen.cursor_color = color_rgb(r, g, b);
+    Py_RETURN_NONE;
+}
+
+static PyObject *
+FastScreen_reset_cursor_color(FastScreenObject *self, PyObject *Py_UNUSED(ignored)) {
+    self->screen.cursor_color = 0;
+    Py_RETURN_NONE;
+}
+
+static PyObject *
 FastScreen_get_scroll_count(FastScreenObject *self, void *closure) {
     return PyLong_FromLong(self->screen.scroll_count);
 }
@@ -478,7 +504,12 @@ FastScreen_render_row_to_ansi(FastScreenObject *self, PyObject *args) {
         uint32_t eff_bg = c->bg_color;
 
         if (at_cursor && x == cursor_x) {
-            eff_flags |= FLAG_REVERSE | FLAG_BOLD;
+            if (s->cursor_color != 0 && color_type(s->cursor_color) == 3) {
+                /* Use custom cursor color as background, keep cell's foreground */
+                eff_bg = s->cursor_color;
+            } else {
+                eff_flags |= FLAG_REVERSE | FLAG_BOLD;
+            }
         }
 
         if (in_selection) {
@@ -562,6 +593,7 @@ static PyGetSetDef FastScreen_getset[] = {
     {"use_alt_screen", (getter)FastScreen_get_use_alt_screen, NULL, NULL, NULL},
     {"mouse_mode", (getter)FastScreen_get_mouse_mode, NULL, NULL, NULL},
     {"scroll_count", (getter)FastScreen_get_scroll_count, NULL, NULL, NULL},
+    {"cursor_color", (getter)FastScreen_get_cursor_color, NULL, NULL, NULL},
     {NULL},
 };
 
@@ -577,6 +609,8 @@ static PyMethodDef FastScreen_methods[] = {
     {"dump_raw", (PyCFunction)FastScreen_dump_raw, METH_NOARGS, NULL},
     {"restore_raw", (PyCFunction)FastScreen_restore_raw, METH_O, NULL},
     {"reset_scroll_count", (PyCFunction)FastScreen_reset_scroll_count, METH_NOARGS, NULL},
+    {"set_cursor_color", (PyCFunction)FastScreen_set_cursor_color, METH_VARARGS, NULL},
+    {"reset_cursor_color", (PyCFunction)FastScreen_reset_cursor_color, METH_NOARGS, NULL},
     {NULL},
 };
 
