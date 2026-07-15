@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import sys
 from datetime import datetime
 
 from plmux.extensions.registry import ExtensionContext, emit_hook
 from plmux.modes import AppContext
+
+_logger = logging.getLogger(__name__)
 
 
 async def clock_ticker(ctx: AppContext) -> None:
@@ -62,4 +65,4 @@ async def status_refresh_ticker(ctx: AppContext) -> None:
             )
             ctx.dirty = True
         except Exception:
-            pass
+            _logger.debug("status_refresh_ticker failed", exc_info=True)

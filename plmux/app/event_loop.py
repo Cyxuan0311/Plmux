@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import signal
 import sys
@@ -13,6 +14,12 @@ from blessed import Terminal
 from rich.console import Console, ConsoleDimensions
 from rich.live import Live
 
+from plmux.app.config_watcher import ConfigWatcher
+from plmux.app.input_reader import InputReader
+from plmux.app.persistence import persist_session
+from plmux.app.remote import setup_remote_mode
+from plmux.app.tickers import clock_ticker, memory_ticker, pet_ticker, status_refresh_ticker
+from plmux.app.utils import parse_cmdline_trigger, parse_prefix_key, terminal_size, win_setup_timer
 from plmux.config.loader import load_config
 from plmux.daemon import ServerState, connect_and_receive
 from plmux.debug_log import setup_debug_logging
@@ -35,22 +42,16 @@ from plmux.ui.renderer import build_root
 from plmux.ui.theme import load_theme
 from plmux.workspace import TmuxServer, try_load_snapshot
 
-from plmux.app.config_watcher import ConfigWatcher
-from plmux.app.input_reader import InputReader
-from plmux.app.persistence import persist_session
-from plmux.app.remote import setup_remote_mode
-from plmux.app.tickers import clock_ticker, memory_ticker, pet_ticker, status_refresh_ticker
-from plmux.app.utils import parse_cmdline_trigger, parse_prefix_key, terminal_size, win_setup_timer
+_logger = logging.getLogger(__name__)
 
 
-async def async_main(
+async def _init_app(
     config_path: str | None,
-    *,
-    debug: bool = False,
-    attach_mode: bool = False,
-    remote_mode: bool = False,
-    target_session: str | None = None,
-) -> ServerState | None:
+    debug: bool,
+    attach_mode: bool,
+    remote_mode: bool,
+    target_session: str | None,
+) -> tuple:
     cfg = load_config(config_path)
     theme = load_theme(cfg.theme)
     outer_color = capture_outer_cursor_color()
@@ -98,11 +99,11 @@ async def async_main(
                     try:
                         pane.screen.set_cursor_color(r, g, b)
                     except Exception:
-                        pass
+                        _logger.debug("set_cursor_color failed", exc_info=True)
 
     loop = asyncio.get_running_loop()
 
-    ipc_recv_task: asyncio.Task | None = None
+    ipc_recv_task = None
     if remote_mode and ipc_conn is not None:
         async def _ipc_recv_loop() -> None:
             try:
@@ -135,9 +136,9 @@ async def async_main(
         loop.add_signal_handler(signal.SIGINT, _handle_sigint)
         sig_handler_ok = True
     except NotImplementedError:
-        pass
+        _logger.debug("add_signal_handler not supported on this platform")
     except Exception:
-        pass
+        _logger.warning("add_signal_handler failed", exc_info=True)
 
     if not sig_handler_ok:
         def _sigint_fallback(_signum, _frame):
@@ -154,6 +155,84 @@ async def async_main(
 
     config_watcher = ConfigWatcher(config_path)
     config_watcher.start(lambda: setattr(ctx, 'config_reload_pending', True))
+
+    return cfg, ctx, ipc_conn, ipc_recv_task, frame_sleep, clock_task, status_task, pet_task, memory_task, config_watcher
+
+
+async def _shutdown_app(
+    ctx: AppContext,
+    cfg,
+    remote_mode: bool,
+    ipc_conn,
+    ipc_recv_task,
+    clock_task,
+    status_task,
+    pet_task,
+    memory_task,
+) -> ServerState | None:
+    if ipc_recv_task is not None:
+        ipc_recv_task.cancel()
+        try:
+            await ipc_recv_task
+        except asyncio.CancelledError:
+            pass
+
+    if remote_mode and ipc_conn is not None:
+        try:
+            await ipc_conn.send_detach()
+        except Exception:
+            _logger.debug("IPC detach send failed", exc_info=True)
+        ipc_conn.close()
+
+    for task in (clock_task, status_task, pet_task, memory_task):
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+    try:
+        from plmux.web.server import stop_web_server
+        await stop_web_server()
+    except Exception:
+        _logger.debug("web server stop failed on shutdown", exc_info=True)
+
+    emit_hook("app_stopping", ExtensionContext())
+
+    if remote_mode:
+        ctx.ws.shutdown()
+        return None
+    if ctx.detach_requested:
+        state = build_detach_state(ctx.ws, cfg)
+        print("\r\n[detached (from session 0)]", flush=True)
+        return state
+    if ctx.hard_quit_requested:
+        from plmux.session.store import resolve_state_path
+        try:
+            path = resolve_state_path(cfg)
+            if path.is_file():
+                path.unlink()
+        except Exception:
+            pass
+        ctx.ws.shutdown()
+        return None
+    if cfg.session.auto_save:
+        persist_session(ctx, cfg)
+    ctx.ws.shutdown()
+    return None
+
+
+async def async_main(
+    config_path: str | None,
+    *,
+    debug: bool = False,
+    attach_mode: bool = False,
+    remote_mode: bool = False,
+    target_session: str | None = None,
+) -> ServerState | None:
+    cfg, ctx, ipc_conn, ipc_recv_task, frame_sleep, clock_task, status_task, pet_task, memory_task, config_watcher = await _init_app(
+        config_path, debug, attach_mode, remote_mode, target_session,
+    )
 
     web_task: asyncio.Task | None = None
 
@@ -173,7 +252,7 @@ async def async_main(
             )
             ctx.dirty = True
         except Exception:
-            pass
+            _logger.warning("web server start failed", exc_info=True)
 
     async def _maybe_start_web() -> None:
         nonlocal web_task
@@ -188,30 +267,31 @@ async def async_main(
                 await stop_web_server()
                 ctx.dirty = True
             except Exception:
-                pass
+                _logger.debug("web server stop failed", exc_info=True)
         if ctx._pending_web_restart:
             ctx._pending_web_restart = False
             web_cfg = ctx.ws.cfg.web
             await _start_web(web_cfg.port)
 
-    with term.cbreak(), term.hidden_cursor():
+    with ctx.term.cbreak(), ctx.term.hidden_cursor():
         with Live(
-            console=console,
+            console=ctx.console,
             screen=cfg.ui.use_alternate_screen,
             auto_refresh=False,
         ) as live:
             try:
                 from blessed.dec_modes import DecPrivateMode
-                term._dec_mode_set_enabled(
+                ctx.term._dec_mode_set_enabled(
                     DecPrivateMode.MOUSE_EXTENDED_SGR,
                     DecPrivateMode.MOUSE_REPORT_DRAG,
                 )
             except Exception:
-                term.stream.write("\x1b[?1002h\x1b[?1006h")
-                term.stream.flush()
-                term._dec_mode_cache[1006] = 1
-                term._dec_mode_cache[1002] = 1
-            input_reader = InputReader(term)
+                _logger.debug("mouse mode setup fallback", exc_info=True)
+                ctx.term.stream.write("\x1b[?1002h\x1b[?1006h")
+                ctx.term.stream.flush()
+                ctx.term._dec_mode_cache[1006] = 1
+                ctx.term._dec_mode_cache[1002] = 1
+            input_reader = InputReader(ctx.term)
             frame_count = 0
             plugins_loaded = False
             _last_resize_rows = 0
@@ -231,8 +311,8 @@ async def async_main(
                             ExtensionContext(extra_config=dict(cfg.extra)),
                         )
 
-                    tw, th = terminal_size(term)
-                    console.size = ConsoleDimensions(width=tw, height=th)
+                    tw, th = terminal_size(ctx.term)
+                    ctx.console.size = ConsoleDimensions(width=tw, height=th)
 
                     inner_rows = max(cfg.ui.min_pane_rows, th - 2)
                     inner_cols = max(cfg.ui.min_pane_cols, tw)
@@ -247,12 +327,12 @@ async def async_main(
                             try:
                                 asyncio.ensure_future(ipc_conn.send_resize(inner_rows, inner_cols))
                             except Exception:
-                                pass
+                                _logger.debug("IPC resize send failed", exc_info=True)
 
                     if not remote_mode:
                         TerminalSession.pump_all_sessions(ctx.ws.all_panes())
                         if ctx.dirty:
-                            term.stream.flush()
+                            ctx.term.stream.flush()
                     else:
                         for sess in ctx.ws.sessions_list:
                             for w in sess.windows:
@@ -261,7 +341,7 @@ async def async_main(
                                         try:
                                             s._pump_queue()
                                         except Exception:
-                                            pass
+                                            _logger.debug("pump_queue failed for pane", exc_info=True)
 
                     keys = input_reader.get_all()
 
@@ -299,7 +379,7 @@ async def async_main(
                             if to_load:
                                 load_plugins(list(to_load), new_cfg.extensions.search_paths)
                         except Exception:
-                            pass
+                            _logger.warning("config reload failed", exc_info=True)
                         ctx.dirty = True
 
                     for key in keys:
@@ -327,7 +407,7 @@ async def async_main(
                         if web_keys:
                             ctx.dirty = True
                     except Exception:
-                        pass
+                        _logger.debug("drain_web_keys failed", exc_info=True)
 
                     ctx.ws.web_mode = ctx.mode
                     ctx.ws.web_cmd_buffer = ctx.cmd_buffer
@@ -340,7 +420,7 @@ async def async_main(
                         from plmux.web.server import notify_web_state_change
                         notify_web_state_change(ctx)
                     except Exception:
-                        pass
+                        _logger.debug("notify_web_state_change failed", exc_info=True)
 
                     win = ctx.ws._window()
                     remain_on_exit = getattr(ctx.cfg.ui, "remain_on_exit", False)
@@ -486,80 +566,20 @@ async def async_main(
             finally:
                 try:
                     from blessed.dec_modes import DecPrivateMode
-                    term._dec_mode_set_disabled(
+                    ctx.term._dec_mode_set_disabled(
                         DecPrivateMode.MOUSE_EXTENDED_SGR,
                         DecPrivateMode.MOUSE_REPORT_DRAG,
                     )
                 except Exception:
-                    term.stream.write("\x1b[?1002l\x1b[?1006l\x1b[?1000l")
-                    term.stream.flush()
-                    term._dec_mode_cache.pop(1006, None)
-                    term._dec_mode_cache.pop(1002, None)
+                    _logger.debug("mouse mode disable fallback", exc_info=True)
+                    ctx.term.stream.write("\x1b[?1002l\x1b[?1006l\x1b[?1000l")
+                    ctx.term.stream.flush()
+                    ctx.term._dec_mode_cache.pop(1006, None)
+                    ctx.term._dec_mode_cache.pop(1002, None)
                 input_reader.stop()
                 config_watcher.stop()
 
-    if ipc_recv_task is not None:
-        ipc_recv_task.cancel()
-        try:
-            await ipc_recv_task
-        except asyncio.CancelledError:
-            pass
-
-    if remote_mode and ipc_conn is not None:
-        try:
-            await ipc_conn.send_detach()
-        except Exception:
-            pass
-        ipc_conn.close()
-
-    clock_task.cancel()
-    status_task.cancel()
-    pet_task.cancel()
-    memory_task.cancel()
-    try:
-        await clock_task
-    except asyncio.CancelledError:
-        pass
-    try:
-        await status_task
-    except asyncio.CancelledError:
-        pass
-    try:
-        await pet_task
-    except asyncio.CancelledError:
-        pass
-    try:
-        await memory_task
-    except asyncio.CancelledError:
-        pass
-
-    try:
-        from plmux.web.server import stop_web_server
-        await stop_web_server()
-    except Exception:
-        pass
-
-    emit_hook("app_stopping", ExtensionContext())
-
-    if remote_mode:
-        ctx.ws.shutdown()
-        return None
-    elif ctx.detach_requested:
-        state = build_detach_state(ctx.ws, cfg)
-        print("\r\n[detached (from session 0)]", flush=True)
-        return state
-    elif ctx.hard_quit_requested:
-        from plmux.session.store import resolve_state_path
-        try:
-            path = resolve_state_path(cfg)
-            if path.is_file():
-                path.unlink()
-        except Exception:
-            pass
-        ctx.ws.shutdown()
-        return None
-    else:
-        if cfg.session.auto_save:
-            persist_session(ctx, cfg)
-        ctx.ws.shutdown()
-        return None
+    return await _shutdown_app(
+        ctx, cfg, remote_mode, ipc_conn, ipc_recv_task,
+        clock_task, status_task, pet_task, memory_task,
+    )
