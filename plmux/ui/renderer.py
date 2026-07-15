@@ -481,6 +481,182 @@ def build_cmdline(
     return text
 
 
+def _apply_overlay_layout(
+    root: Layout,
+    main: Layout,
+    status_text: Text,
+    cmd: Text,
+    status_position: str,
+) -> None:
+    if status_position == "top":
+        root.split_column(
+            Layout(status_text, name="status", size=1),
+            main,
+            Layout(cmd, name="cmd", size=1),
+        )
+    else:
+        root.split_column(
+            main,
+            Layout(status_text, name="status", size=1),
+            Layout(cmd, name="cmd", size=1),
+        )
+
+
+def _resolve_overlay(
+    ws: TmuxServer,
+    theme: Theme,
+    *,
+    help_active: bool,
+    help_tab: int,
+    help_scroll_offset: int,
+    theme_list_active: bool,
+    theme_list_cursor: int,
+    theme_search_query: str,
+    session_list_active: bool,
+    session_list_cursor: int,
+    session_list_tab: int,
+    plugin_list_active: bool,
+    plugin_list_cursor: int,
+    plugin_search_paths: list[str] | None,
+    plugin_enabled_names: list[str] | None,
+    layout_list_active: bool,
+    layout_list_cursor: int,
+    layout_list_tab: int,
+    layout_custom_cursor: int,
+    layout_builder: dict | None,
+    custom_layouts: list | None,
+    current_panes: int,
+    statusbar_style_active: bool,
+    statusbar_style_cursor: int,
+    pane_border_style_active: bool,
+    pane_border_style_cursor: int,
+    web_token_active: bool,
+    web_token_cursor: int,
+    web_token_last_generated: str | None,
+    web_token_last_mode: str | None,
+    plugin_overlay_name: str,
+    plugin_state: dict | None,
+    memory_active: bool,
+    memory_cursor: int,
+    terminal_width: int,
+    terminal_height: int,
+) -> Panel | None:
+    if help_active:
+        return build_help_overlay(
+            theme,
+            active_tab=help_tab,
+            terminal_width=terminal_width,
+            terminal_height=terminal_height,
+            scroll_offset=help_scroll_offset,
+            bindings=ws.cfg.keys.bindings,
+        )
+
+    if theme_list_active:
+        return build_theme_list_overlay(
+            theme,
+            cursor=theme_list_cursor,
+            terminal_width=terminal_width,
+            terminal_height=terminal_height,
+            search_query=theme_search_query,
+        )
+
+    if session_list_active:
+        return build_session_list_overlay(
+            ws, theme,
+            cursor=session_list_cursor,
+            active_tab=session_list_tab,
+            terminal_width=terminal_width,
+            terminal_height=terminal_height,
+        )
+
+    if plugin_list_active:
+        return build_plugin_list_overlay(
+            theme,
+            search_paths=plugin_search_paths or [],
+            enabled_names=plugin_enabled_names or [],
+            cursor=plugin_list_cursor,
+            terminal_width=terminal_width,
+            terminal_height=terminal_height,
+        )
+
+    if layout_list_active:
+        return build_layout_list_overlay(
+            theme,
+            cursor=layout_list_cursor,
+            current_panes=current_panes,
+            terminal_width=terminal_width,
+            terminal_height=terminal_height,
+            tab=layout_list_tab,
+            custom_cursor=layout_custom_cursor,
+            builder=layout_builder,
+            custom_layouts=custom_layouts,
+        )
+
+    if statusbar_style_active:
+        from plmux.ui.status_bar_style_overlay import build_status_bar_style_overlay
+        return build_status_bar_style_overlay(
+            ws.cfg.ui.status_bar_style,
+            theme,
+            cursor=statusbar_style_cursor,
+            terminal_width=terminal_width,
+            terminal_height=terminal_height,
+        )
+
+    if pane_border_style_active:
+        from plmux.ui.pane_border_style_overlay import build_pane_border_style_overlay
+        return build_pane_border_style_overlay(
+            ws.cfg.ui.pane_border_style,
+            theme,
+            cursor=pane_border_style_cursor,
+            terminal_width=terminal_width,
+            terminal_height=terminal_height,
+        )
+
+    if web_token_active:
+        from plmux.web.server import _web_server
+        wt_tokens = _web_server.token_manager.list_tokens() if _web_server else []
+        return build_web_token_overlay(
+            theme,
+            tokens=wt_tokens,
+            last_generated=web_token_last_generated,
+            last_generated_mode=web_token_last_mode,
+            cursor=web_token_cursor,
+            server_running=_web_server is not None,
+            terminal_width=terminal_width,
+            terminal_height=terminal_height,
+        )
+
+    if plugin_overlay_name:
+        overlay_fn = get_plugin_overlay(plugin_overlay_name)
+        if overlay_fn is not None:
+            try:
+                return overlay_fn(
+                    theme,
+                    terminal_width=terminal_width,
+                    terminal_height=terminal_height,
+                    plugin_state=plugin_state or {},
+                )
+            except Exception:
+                return Panel(
+                    f"Plugin overlay error: {plugin_overlay_name}",
+                    border_style="red",
+                )
+        return None
+
+    if memory_active:
+        from plmux.ui.memory_data import collect_all_pane_memory
+        mem_data = collect_all_pane_memory(ws)
+        return build_memory_overlay(
+            theme,
+            data=mem_data,
+            cursor=memory_cursor,
+            terminal_width=terminal_width,
+            terminal_height=terminal_height,
+        )
+
+    return None
+
+
 def build_root(
     ws: TmuxServer,
     *,
@@ -535,10 +711,8 @@ def build_root(
     memory_cursor: int = 0,
 ) -> Layout:
     theme = ws.theme
-    # support additional status indicators
     extra_items = extra_items or []
 
-    # support zoomed single-pane view if workspace requests it
     zoom_idx = getattr(ws, "zoom_pane", None)
     is_copy = mode.upper() == "COPY"
     win = ws._window()
@@ -574,275 +748,27 @@ def build_root(
         autosuggest_suggestion=autosuggest_suggestion,
     )
 
+    overlay = _resolve_overlay(
+        ws, theme,
+        help_active=help_active, help_tab=help_tab, help_scroll_offset=help_scroll_offset,
+        theme_list_active=theme_list_active, theme_list_cursor=theme_list_cursor, theme_search_query=theme_search_query,
+        session_list_active=session_list_active, session_list_cursor=session_list_cursor, session_list_tab=session_list_tab,
+        plugin_list_active=plugin_list_active, plugin_list_cursor=plugin_list_cursor,
+        plugin_search_paths=plugin_search_paths, plugin_enabled_names=plugin_enabled_names,
+        layout_list_active=layout_list_active, layout_list_cursor=layout_list_cursor,
+        layout_list_tab=layout_list_tab, layout_custom_cursor=layout_custom_cursor,
+        layout_builder=layout_builder, custom_layouts=custom_layouts, current_panes=current_panes,
+        statusbar_style_active=statusbar_style_active, statusbar_style_cursor=statusbar_style_cursor,
+        pane_border_style_active=pane_border_style_active, pane_border_style_cursor=pane_border_style_cursor,
+        web_token_active=web_token_active, web_token_cursor=web_token_cursor,
+        web_token_last_generated=web_token_last_generated, web_token_last_mode=web_token_last_mode,
+        plugin_overlay_name=plugin_overlay_name, plugin_state=plugin_state,
+        memory_active=memory_active, memory_cursor=memory_cursor,
+        terminal_width=terminal_width, terminal_height=terminal_height,
+    )
+    if overlay is not None:
+        main = Layout(Align.center(overlay, vertical="middle"), name="main")
+
     root = Layout(name="root")
-
-    if help_active:
-        help_panel = build_help_overlay(
-            theme,
-            active_tab=help_tab,
-            terminal_width=terminal_width,
-            terminal_height=terminal_height,
-            scroll_offset=help_scroll_offset,
-            bindings=ws.cfg.keys.bindings,
-        )
-        centered_help = Align.center(help_panel, vertical="middle")
-
-        if status_position == "top":
-            root.split_column(
-                Layout(status_text, name="status", size=1),
-                Layout(centered_help, name="main"),
-                Layout(cmd, name="cmd", size=1),
-            )
-        else:
-            root.split_column(
-                Layout(centered_help, name="main"),
-                Layout(status_text, name="status", size=1),
-                Layout(cmd, name="cmd", size=1),
-            )
-    elif theme_list_active:
-        theme_panel = build_theme_list_overlay(
-            theme,
-            cursor=theme_list_cursor,
-            terminal_width=terminal_width,
-            terminal_height=terminal_height,
-            search_query=theme_search_query,
-        )
-        centered_theme = Align.center(theme_panel, vertical="middle")
-
-        if status_position == "top":
-            root.split_column(
-                Layout(status_text, name="status", size=1),
-                Layout(centered_theme, name="main"),
-                Layout(cmd, name="cmd", size=1),
-            )
-        else:
-            root.split_column(
-                Layout(centered_theme, name="main"),
-                Layout(status_text, name="status", size=1),
-                Layout(cmd, name="cmd", size=1),
-            )
-    elif session_list_active:
-        session_panel = build_session_list_overlay(
-            ws,
-            theme,
-            cursor=session_list_cursor,
-            active_tab=session_list_tab,
-            terminal_width=terminal_width,
-            terminal_height=terminal_height,
-        )
-        centered_session = Align.center(session_panel, vertical="middle")
-
-        if status_position == "top":
-            root.split_column(
-                Layout(status_text, name="status", size=1),
-                Layout(centered_session, name="main"),
-                Layout(cmd, name="cmd", size=1),
-            )
-        else:
-            root.split_column(
-                Layout(centered_session, name="main"),
-                Layout(status_text, name="status", size=1),
-                Layout(cmd, name="cmd", size=1),
-            )
-    elif plugin_list_active:
-        plugin_panel = build_plugin_list_overlay(
-            theme,
-            search_paths=plugin_search_paths or [],
-            enabled_names=plugin_enabled_names or [],
-            cursor=plugin_list_cursor,
-            terminal_width=terminal_width,
-            terminal_height=terminal_height,
-        )
-        centered_plugin = Align.center(plugin_panel, vertical="middle")
-
-        if status_position == "top":
-            root.split_column(
-                Layout(status_text, name="status", size=1),
-                Layout(centered_plugin, name="main"),
-                Layout(cmd, name="cmd", size=1),
-            )
-        else:
-            root.split_column(
-                Layout(centered_plugin, name="main"),
-                Layout(status_text, name="status", size=1),
-                Layout(cmd, name="cmd", size=1),
-            )
-    elif layout_list_active:
-        layout_panel = build_layout_list_overlay(
-            theme,
-            cursor=layout_list_cursor,
-            current_panes=current_panes,
-            terminal_width=terminal_width,
-            terminal_height=terminal_height,
-            tab=layout_list_tab,
-            custom_cursor=layout_custom_cursor,
-            builder=layout_builder,
-            custom_layouts=custom_layouts,
-        )
-        centered_layout = Align.center(layout_panel, vertical="middle")
-
-        if status_position == "top":
-            root.split_column(
-                Layout(status_text, name="status", size=1),
-                Layout(centered_layout, name="main"),
-                Layout(cmd, name="cmd", size=1),
-            )
-        else:
-            root.split_column(
-                Layout(centered_layout, name="main"),
-                Layout(status_text, name="status", size=1),
-                Layout(cmd, name="cmd", size=1),
-            )
-    elif statusbar_style_active:
-        from plmux.ui.status_bar_style_overlay import build_status_bar_style_overlay
-        sb_panel = build_status_bar_style_overlay(
-            ws.cfg.ui.status_bar_style,
-            theme,
-            cursor=statusbar_style_cursor,
-            terminal_width=terminal_width,
-            terminal_height=terminal_height,
-        )
-        centered_sb = Align.center(sb_panel, vertical="middle")
-
-        if status_position == "top":
-            root.split_column(
-                Layout(status_text, name="status", size=1),
-                Layout(centered_sb, name="main"),
-                Layout(cmd, name="cmd", size=1),
-            )
-        else:
-            root.split_column(
-                Layout(centered_sb, name="main"),
-                Layout(status_text, name="status", size=1),
-                Layout(cmd, name="cmd", size=1),
-            )
-    elif pane_border_style_active:
-        from plmux.ui.pane_border_style_overlay import build_pane_border_style_overlay
-        pb_panel = build_pane_border_style_overlay(
-            ws.cfg.ui.pane_border_style,
-            theme,
-            cursor=pane_border_style_cursor,
-            terminal_width=terminal_width,
-            terminal_height=terminal_height,
-        )
-        centered_pb = Align.center(pb_panel, vertical="middle")
-
-        if status_position == "top":
-            root.split_column(
-                Layout(status_text, name="status", size=1),
-                Layout(centered_pb, name="main"),
-                Layout(cmd, name="cmd", size=1),
-            )
-        else:
-            root.split_column(
-                Layout(centered_pb, name="main"),
-                Layout(status_text, name="status", size=1),
-                Layout(cmd, name="cmd", size=1),
-            )
-    elif web_token_active:
-        from plmux.web.server import _web_server
-        wt_tokens = _web_server.token_manager.list_tokens() if _web_server else []
-        wt_panel = build_web_token_overlay(
-            theme,
-            tokens=wt_tokens,
-            last_generated=web_token_last_generated,
-            last_generated_mode=web_token_last_mode,
-            cursor=web_token_cursor,
-            server_running=_web_server is not None,
-            terminal_width=terminal_width,
-            terminal_height=terminal_height,
-        )
-        centered_wt = Align.center(wt_panel, vertical="middle")
-
-        if status_position == "top":
-            root.split_column(
-                Layout(status_text, name="status", size=1),
-                Layout(centered_wt, name="main"),
-                Layout(cmd, name="cmd", size=1),
-            )
-        else:
-            root.split_column(
-                Layout(centered_wt, name="main"),
-                Layout(status_text, name="status", size=1),
-                Layout(cmd, name="cmd", size=1),
-            )
-    elif plugin_overlay_name:
-        overlay_fn = get_plugin_overlay(plugin_overlay_name)
-        if overlay_fn is not None:
-            try:
-                plugin_panel = overlay_fn(
-                    theme,
-                    terminal_width=terminal_width,
-                    terminal_height=terminal_height,
-                    plugin_state=plugin_state or {},
-                )
-            except Exception:
-                plugin_panel = Panel(
-                    f"Plugin overlay error: {plugin_overlay_name}",
-                    border_style="red",
-                )
-            centered_plugin = Align.center(plugin_panel, vertical="middle")
-
-            if status_position == "top":
-                root.split_column(
-                    Layout(status_text, name="status", size=1),
-                    Layout(centered_plugin, name="main"),
-                    Layout(cmd, name="cmd", size=1),
-                )
-            else:
-                root.split_column(
-                    Layout(centered_plugin, name="main"),
-                    Layout(status_text, name="status", size=1),
-                    Layout(cmd, name="cmd", size=1),
-                )
-        else:
-            if status_position == "top":
-                root.split_column(
-                    Layout(status_text, name="status", size=1),
-                    Layout(main, name="main"),
-                    Layout(cmd, name="cmd", size=1),
-                )
-            else:
-                root.split_column(
-                    Layout(main, name="main"),
-                    Layout(status_text, name="status", size=1),
-                    Layout(cmd, name="cmd", size=1),
-                )
-    elif memory_active:
-        from plmux.ui.memory_data import collect_all_pane_memory
-        mem_data = collect_all_pane_memory(ws)
-        mem_panel = build_memory_overlay(
-            theme,
-            data=mem_data,
-            cursor=memory_cursor,
-            terminal_width=terminal_width,
-            terminal_height=terminal_height,
-        )
-        centered_mem = Align.center(mem_panel, vertical="middle")
-
-        if status_position == "top":
-            root.split_column(
-                Layout(status_text, name="status", size=1),
-                Layout(centered_mem, name="main"),
-                Layout(cmd, name="cmd", size=1),
-            )
-        else:
-            root.split_column(
-                Layout(centered_mem, name="main"),
-                Layout(status_text, name="status", size=1),
-                Layout(cmd, name="cmd", size=1),
-            )
-    elif status_position == "top":
-        root.split_column(
-            Layout(status_text, name="status", size=1),
-            Layout(main, name="main"),
-            Layout(cmd, name="cmd", size=1),
-        )
-    else:
-        root.split_column(
-            Layout(main, name="main"),
-            Layout(status_text, name="status", size=1),
-            Layout(cmd, name="cmd", size=1),
-        )
-
+    _apply_overlay_layout(root, main, status_text, cmd, status_position)
     return root
