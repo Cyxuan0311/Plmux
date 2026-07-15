@@ -11,7 +11,7 @@ import sys
 import threading
 import time
 import zlib
-from typing import Any, Callable, Optional
+from typing import Any, Callable
 
 try:
     import fcntl as _fcntl
@@ -77,30 +77,25 @@ class TerminalSession:
 
     DEFAULT_SCROLLBACK = 10000
 
-    def __init__(
+    def _init_common(
         self,
         rows: int,
         cols: int,
-        shell: Optional[list[str]] = None,
-        env: Optional[dict] = None,
-        on_update: Optional[Callable[[], None]] = None,
-        scrollback_lines: int = DEFAULT_SCROLLBACK,
+        argv: list[str] | None = None,
+        env_extra: dict | None = None,
+        on_update: Callable[[], None] | None = None,
+        scrollback_max: int = DEFAULT_SCROLLBACK,
     ) -> None:
         self.rows = max(1, rows)
         self.cols = max(1, cols)
-        self._argv = resolve_shell_argv(shell)
-        self._env_extra = dict(env or {})
+        self._argv = list(argv) if argv is not None else resolve_shell_argv(None)
+        self._env_extra = dict(env_extra) if env_extra else {}
         self._on_update = on_update
-        self._scrollback_max = max(0, scrollback_lines)
+        self._scrollback_max = max(0, scrollback_max)
         self._scrollback: list[str] = []
         self.screen = Screen(self.cols, self.rows)
         self.stream = ByteStream()
         self.stream.attach(self.screen)
-        self.proc = spawn_pty(
-            self._argv,
-            (self.rows, self.cols),
-            env=self._env_extra,
-        )
         self._closed = False
         self._cached_closed = False
         self._dead = False
@@ -109,15 +104,13 @@ class TerminalSession:
         self._app_cursor_keys = False
         self._screen_lock = threading.Lock()
         self._read_queue: queue.Queue[bytes] = queue.Queue()
-        self._reader_thread = threading.Thread(
-            target=self._reader_loop, name="plmux-pty-reader", daemon=True
-        )
-        self._reader_thread.start()
-        self._set_nonblocking()
         self._line_cache: dict[int, list[tuple[str, str | None]]] = {}
         self._last_cursor_y: int = -1
         self._last_cursor_x: int = -1
         self._scroll_offset: int = 0
+        self._reset_copy_state()
+
+    def _reset_copy_state(self) -> None:
         self._copy_scroll_offset: int = 0
         self._copy_cursor_pos: tuple[int, int] | None = None
         self._copy_sel_start: tuple[int, int] | None = None
@@ -125,6 +118,36 @@ class TerminalSession:
         self._copy_search_matches: list[tuple[int, int]] | None = None
         self._copy_line_mode: bool = False
         self._copy_rect_mode: bool = False
+
+    def _start_reader(self) -> None:
+        self._reader_thread = threading.Thread(
+            target=self._reader_loop, name="plmux-pty-reader", daemon=True
+        )
+        self._reader_thread.start()
+
+    def __init__(
+        self,
+        rows: int,
+        cols: int,
+        shell: list[str] | None = None,
+        env: dict | None = None,
+        on_update: Callable[[], None] | None = None,
+        scrollback_lines: int = DEFAULT_SCROLLBACK,
+    ) -> None:
+        self._init_common(
+            rows, cols,
+            argv=resolve_shell_argv(shell),
+            env_extra=env,
+            on_update=on_update,
+            scrollback_max=scrollback_lines,
+        )
+        self.proc = spawn_pty(
+            self._argv,
+            (self.rows, self.cols),
+            env=self._env_extra,
+        )
+        self._start_reader()
+        self._set_nonblocking()
 
     @property
     def scroll_offset(self) -> int:
@@ -199,45 +222,19 @@ class TerminalSession:
         cols: int,
         argv: list[str],
         *,
-        on_update: Optional[Callable[[], None]] = None,
+        on_update: Callable[[], None] | None = None,
         _sock: Any = None,
-    ) -> "TerminalSession":
+    ) -> TerminalSession:
         self = cls.__new__(cls)
-        self.rows = max(1, rows)
-        self.cols = max(1, cols)
-        self._argv = list(argv)
-        self._env_extra = {}
-        self._on_update = on_update
-        self._scrollback_max = cls.DEFAULT_SCROLLBACK
-        self._scrollback: list[str] = []
-        self.screen = Screen(self.cols, self.rows)
-        self.stream = ByteStream()
-        self.stream.attach(self.screen)
-        self.proc = PtyHandle(fd, pid, _sock=_sock)
-        self._closed = False
-        self._cached_closed = False
-        self._dead = False
-        self._last_alive_check = 0.0
-        self._pty_nonblocking = False
-        self._app_cursor_keys = False
-        self._screen_lock = threading.Lock()
-        self._read_queue = queue.Queue()
-        self._reader_thread = threading.Thread(
-            target=self._reader_loop, name="plmux-pty-reader", daemon=True
+        self._init_common(
+            rows, cols,
+            argv=list(argv),
+            env_extra={},
+            on_update=on_update,
         )
-        self._reader_thread.start()
+        self.proc = PtyHandle(fd, pid, _sock=_sock)
+        self._start_reader()
         self._set_nonblocking()
-        self._line_cache = {}
-        self._last_cursor_y = -1
-        self._last_cursor_x = -1
-        self._scroll_offset = 0
-        self._copy_scroll_offset = 0
-        self._copy_cursor_pos = None
-        self._copy_sel_start = None
-        self._copy_sel_end = None
-        self._copy_search_matches = None
-        self._copy_line_mode = False
-        self._copy_rect_mode = False
         return self
 
     @classmethod
@@ -247,41 +244,18 @@ class TerminalSession:
         cols: int,
         argv: list[str],
         *,
-        on_update: Optional[Callable[[], None]] = None,
-        on_write: Optional[Callable[[bytes], None]] = None,
-    ) -> "TerminalSession":
+        on_update: Callable[[], None] | None = None,
+        on_write: Callable[[bytes], None] | None = None,
+    ) -> TerminalSession:
         self = cls.__new__(cls)
-        self.rows = max(1, rows)
-        self.cols = max(1, cols)
-        self._argv = list(argv)
-        self._env_extra = {}
-        self._on_update = on_update
-        self._scrollback_max = cls.DEFAULT_SCROLLBACK
-        self._scrollback: list[str] = []
-        self.screen = Screen(self.cols, self.rows)
-        self.stream = ByteStream()
-        self.stream.attach(self.screen)
+        self._init_common(
+            rows, cols,
+            argv=list(argv),
+            env_extra={},
+            on_update=on_update,
+        )
         self.proc = None
-        self._closed = False
-        self._cached_closed = False
-        self._dead = False
-        self._last_alive_check = 0.0
-        self._pty_nonblocking = False
-        self._app_cursor_keys = False
-        self._screen_lock = threading.Lock()
-        self._read_queue: queue.Queue[bytes] = queue.Queue()
         self._reader_thread = None
-        self._line_cache: dict[int, list[tuple[str, str | None]]] = {}
-        self._last_cursor_y: int = -1
-        self._last_cursor_x: int = -1
-        self._scroll_offset: int = 0
-        self._copy_scroll_offset: int = 0
-        self._copy_cursor_pos: tuple[int, int] | None = None
-        self._copy_sel_start: tuple[int, int] | None = None
-        self._copy_sel_end: tuple[int, int] | None = None
-        self._copy_search_matches: list[tuple[int, int]] | None = None
-        self._copy_line_mode: bool = False
-        self._copy_rect_mode: bool = False
         self._on_write = on_write
         self._is_remote = True
         return self
