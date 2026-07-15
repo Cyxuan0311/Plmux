@@ -711,7 +711,13 @@ class WebClientServer:
         rel_path = url_path.lstrip("/")
         if rel_path.startswith("static/"):
             rel_path = rel_path[len("static/"):]
-        file_path = os.path.join(_STATIC_DIR, rel_path)
+
+        static_dir = os.path.realpath(_STATIC_DIR)
+        file_path = os.path.realpath(os.path.join(_STATIC_DIR, rel_path))
+
+        if not file_path.startswith(os.path.join(static_dir, "")):
+            await self._serve_404(writer)
+            return
 
         if not os.path.isfile(file_path):
             await self._serve_404(writer)

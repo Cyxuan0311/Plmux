@@ -173,6 +173,7 @@ def emit_hook(name: str, ctx: ExtensionContext) -> None:
 
 def _run_hook_command(cmd: str, ctx: ExtensionContext) -> None:
     import subprocess
+    import shlex
     from plmux.format import FormatContext, expand_format
     fmt_ctx = FormatContext(
         session_index=ctx.session_index,
@@ -205,8 +206,9 @@ def _run_hook_command(cmd: str, ctx: ExtensionContext) -> None:
         env["PLMUX_SESSION_NAME"] = fmt_ctx.session_name
     if fmt_ctx.window_name:
         env["PLMUX_WINDOW_NAME"] = fmt_ctx.window_name
+    args = shlex.split(expanded_cmd)
     kwargs: dict = dict(
-        shell=True,
+        shell=False,
         env=env,
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
@@ -214,7 +216,7 @@ def _run_hook_command(cmd: str, ctx: ExtensionContext) -> None:
     )
     if sys.platform == "win32":
         kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
-    subprocess.Popen(expanded_cmd, **kwargs)
+    subprocess.Popen(args, **kwargs)
 
 
 def register_command(name: str, fn: Callable) -> None:
