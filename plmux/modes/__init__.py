@@ -3,16 +3,24 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
+
+if TYPE_CHECKING:
+    from blessed import Terminal
+    from rich.console import Console
+
+    from plmux.config.schema import PlmuxConfig
+    from plmux.ui.theme import Theme
+    from plmux.workspace.server import TmuxServer
 
 
 @dataclass
 class AppContext:
-    ws: Any = None
-    cfg: Any = None
-    theme: Any = None
-    term: Any = None
-    console: Any = None
+    ws: TmuxServer | None = None
+    cfg: PlmuxConfig | None = None
+    theme: Theme | None = None
+    term: Terminal | None = None
+    console: Console | None = None
 
     mode: str = "normal"
     cmd_buffer: str = ""
